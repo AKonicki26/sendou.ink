@@ -20,8 +20,8 @@ import { ScheduleNudge } from "~/features/availability/components/ScheduleNudge"
 import { useChatContext } from "~/features/chat/ChatProvider";
 import { FriendMenu } from "~/features/friends/components/FriendMenu";
 import { SENDOUQ_ACTIVITY_LABEL } from "~/features/friends/friends-constants";
-import { canAccessTrophies } from "~/features/trophies/trophies-utils";
 import { useClosePopoversOnNavigation } from "~/hooks/useClosePopoversOnNavigation";
+import { useLayoutSize } from "~/hooks/useLayoutSize";
 import { useScrollLock } from "~/hooks/useScrollLock";
 import { useUnseenFriendRequests } from "~/hooks/useUnseenFriendRequests";
 import type { RootLoaderData } from "~/root";
@@ -83,8 +83,7 @@ export function MobileNav({ sidebarData }: { sidebarData: SidebarData }) {
 	useScrollLock(activePanel !== null);
 	useClosePopoversOnNavigation(rootRef);
 
-	const chatContextRef = React.useRef(chatContext);
-	chatContextRef.current = chatContext;
+	const openChat = React.useEffectEvent(() => chatContext?.setChatOpen(true));
 
 	React.useEffect(() => {
 		// a panel can be opened before hydration, its toggle event long gone
@@ -94,7 +93,7 @@ export function MobileNav({ sidebarData }: { sidebarData: SidebarData }) {
 		if (openPanel) {
 			setActivePanel(openPanel);
 			if (openPanel === "chat") {
-				chatContextRef.current?.setChatOpen(true);
+				openChat();
 			}
 		}
 
@@ -102,6 +101,22 @@ export function MobileNav({ sidebarData }: { sidebarData: SidebarData }) {
 		if (!root || root.matches(":popover-open")) return;
 		root.showPopover();
 	}, [uid]);
+
+	// currently only used to open chat when clicking on a mention notification
+	const chatOpenRequest = chatContext?.chatOpenRequest ?? 0;
+	const isMobileLayout = useLayoutSize() === "mobile";
+	const handledChatOpenRequestRef = React.useRef(chatOpenRequest);
+
+	React.useEffect(() => {
+		if (chatOpenRequest === handledChatOpenRequestRef.current) return;
+		handledChatOpenRequestRef.current = chatOpenRequest;
+		if (!isMobileLayout) return;
+
+		const chatPanel = document.getElementById(panelDomId(uid, "chat"));
+		if (chatPanel && !chatPanel.matches(":popover-open")) {
+			chatPanel.showPopover();
+		}
+	}, [chatOpenRequest, isMobileLayout, uid]);
 
 	const hasFriendInSendouQ =
 		sidebarData?.friends.some((f) => f.subtitle === SENDOUQ_ACTIVITY_LABEL) ??
@@ -435,29 +450,25 @@ function MenuPanel({
 
 				<nav aria-label={t("front:mobileNav.menu")}>
 					<ul className={styles.navGrid}>
-						{navItems
-							.filter(
-								(item) => item.name !== "trophies" || canAccessTrophies(user),
-							)
-							.map((item) => (
-								<li key={item.name}>
-									<Link
-										to={`/${item.url}`}
-										prefetch="intent"
-										className={styles.navItem}
-									>
-										<div className={styles.navItemImage}>
-											<Image
-												path={navIconUrl(item.name)}
-												height={32}
-												width={32}
-												alt=""
-											/>
-										</div>
-										<span>{t(`common:pages.${item.name}` as any)}</span>
-									</Link>
-								</li>
-							))}
+						{navItems.map((item) => (
+							<li key={item.name}>
+								<Link
+									to={`/${item.url}`}
+									prefetch="intent"
+									className={styles.navItem}
+								>
+									<div className={styles.navItemImage}>
+										<Image
+											path={navIconUrl(item.name)}
+											height={32}
+											width={32}
+											alt=""
+										/>
+									</div>
+									<span>{t(`common:pages.${item.name}` as any)}</span>
+								</Link>
+							</li>
+						))}
 					</ul>
 				</nav>
 

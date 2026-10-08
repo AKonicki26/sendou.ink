@@ -186,6 +186,7 @@ export const NAV_ICONS = [
 	"associations",
 	"badges",
 	"luti",
+	"scanner",
 ] as const;
 
 export type NavIcon = (typeof NAV_ICONS)[number];
@@ -210,6 +211,8 @@ export const pwaSplashScreenImageUrl = (fileName: string) =>
 
 export const soundPath = (fileName: string) =>
 	`${STATIC_ASSETS_URL}/sounds/${fileName}.wav`;
+export const chatStickerUrl = (stickerId: string) =>
+	`${STATIC_ASSETS_URL}/img/chat-stickers/${stickerId}.gif`;
 
 export const GET_FRIENDS_FOR_ADDING_ROUTE = "/friends-for-adding";
 export const PATRONS_LIST_ROUTE = "/patrons-list";
@@ -228,6 +231,8 @@ export const chatRoomMessagesRoute = (roomId: number) =>
 	`${chatRoomDataRoute(roomId)}/messages`;
 export const chatRoomReadRoute = (roomId: number) =>
 	`${chatRoomDataRoute(roomId)}/read`;
+export const chatRoomMentionsSeenRoute = (roomId: number) =>
+	`${chatRoomDataRoute(roomId)}/mentions/seen`;
 
 export const userCardFriendshipPage = (userId: number) =>
 	`/user-card/${userId}/friendship`;
@@ -241,8 +246,16 @@ export const trophyPage = (trophyId: number) => `${TROPHIES_PAGE}/${trophyId}`;
 export const trophyWinsPage = (args: { trophyId: number; userId: number }) =>
 	`${TROPHIES_PAGE}/${args.trophyId}/wins/${args.userId}`;
 
+export const trophyPlacementsPage = (args: {
+	trophyId: number;
+	userId: number;
+}) => `${TROPHIES_PAGE}/${args.trophyId}/placements/${args.userId}`;
 export const trophyTournamentsPage = (trophyId: number) =>
 	`${TROPHIES_PAGE}/${trophyId}/tournaments`;
+export const trophyBackfillPage = (args: {
+	trophyId: number;
+	seriesId: number;
+}) => `${TROPHIES_PAGE}/${args.trophyId}/backfill/${args.seriesId}`;
 
 export interface UserLinkArgs {
 	discordId: Tables["User"]["discordId"];

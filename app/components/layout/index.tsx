@@ -10,7 +10,6 @@ import {
 	Users,
 } from "lucide-react";
 import * as React from "react";
-import { ViewTransition } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useFetcher, useLocation, useMatches } from "react-router";
 import { Config } from "~/config";
@@ -44,6 +43,7 @@ import { Avatar } from "../Avatar";
 import { SendouButton, type SendouButtonProps } from "../elements/Button";
 import { SendouModal } from "../elements/Dialog";
 import { isOwnToggle } from "../elements/Popover";
+import { Flipper } from "../Flipper";
 import { FuseZone } from "../fuse/Fuse";
 import { Image } from "../Image";
 import { MobileNav } from "../MobileNav";
@@ -145,11 +145,18 @@ function useSideNavCollapsed(initialCollapsed: boolean) {
 }
 
 /** Open state of a tablet-layout-only modal; leaving that layout or navigating closes it. */
-function useTabletModal(isTabletLayout: boolean) {
+function useTabletModal(isTabletLayout: boolean, openRequest: number) {
 	const location = useLocation();
 	const [openedOnPathname, setOpenedOnPathname] = React.useState<string | null>(
 		null,
 	);
+
+	const [handledOpenRequest, setHandledOpenRequest] =
+		React.useState(openRequest);
+	if (openRequest !== handledOpenRequest) {
+		setHandledOpenRequest(openRequest);
+		if (isTabletLayout) setOpenedOnPathname(location.pathname);
+	}
 
 	const isOpen = isTabletLayout && openedOnPathname === location.pathname;
 	const setIsOpen = (open: boolean) =>
@@ -264,8 +271,10 @@ export function Layout({
 	useClosePopoversOnNavigation(sideNavRef);
 	useScrollLock(sideNavDrawerOpen);
 	useVisualViewport();
-	const [chatSidebarModalOpen, setChatSidebarModalOpen] =
-		useTabletModal(isTabletLayout);
+	const [chatSidebarModalOpen, setChatSidebarModalOpen] = useTabletModal(
+		isTabletLayout,
+		chatContext?.chatOpenRequest ?? 0,
+	);
 	const chatSidebarOpen = chatContext?.chatOpen ?? false;
 	const setChatSidebarOpen = chatContext?.setChatOpen ?? (() => {});
 
@@ -540,20 +549,10 @@ function SiteTitle() {
 	const hasBreadcrumbs = breadcrumbs.length > 0;
 
 	return (
-		<div className={styles.siteTitle}>
-			{/* the key remounts the logo when it changes place so it animates as a
-			    shared element; an update animation would instead run on every
-			    navigation since React can't tell the logo didn't move */}
-			<ViewTransition
-				key={isFrontPage ? "front" : "other"}
-				name="site-logo"
-				share="auto"
-				default="none"
-			>
-				<Link to="/" className={styles.siteLogo}>
-					<SiteLogoContent />
-				</Link>
-			</ViewTransition>
+		<Flipper flipKey={isFrontPage} className={styles.siteTitle}>
+			<Link to="/" className={styles.siteLogo} data-flip-id="site-logo">
+				<SiteLogoContent />
+			</Link>
 
 			{hasBreadcrumbs ? (
 				<>
@@ -579,7 +578,7 @@ function SiteTitle() {
 					) : null}
 				</>
 			) : null}
-		</div>
+		</Flipper>
 	);
 }
 

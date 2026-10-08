@@ -415,6 +415,8 @@ export interface GroupMatchMap {
 }
 
 export interface GroupMember {
+	/** Member who quick added this one as their friend, `null` if they joined on their own. */
+	addedByUserId: number | null;
 	createdAt: Generated<number>;
 	groupId: number;
 	/** When the member last let a {@link GroupReadyCheck} expire without confirming, letting the rest of the group kick them. `null` if they have not. */
@@ -461,6 +463,16 @@ export interface PrivateUserNote {
 	text: string | null;
 	sentiment: "POSITIVE" | "NEUTRAL" | "NEGATIVE";
 	updatedAt: Generated<number>;
+}
+
+/** History of user written public texts, kept for moderators to review */
+export interface ModAuditLog {
+	id: GeneratedAlways<number>;
+	type: "SENDOUQ_PUBLIC_NOTE";
+	/** Author of the text */
+	userId: number;
+	text: string;
+	createdAt: Generated<number>;
 }
 
 /** Log-in links generated via the Lohi Discord bot commands. */
@@ -557,6 +569,8 @@ export interface ReportedWeapon {
 	userId: number;
 	weaponSplId: MainWeaponId;
 	createdAt: Generated<number>;
+	/** the scanner read this weapon was reported from, null when reported by hand */
+	ingestedMatchId: number | null;
 }
 
 export interface IngestedMatch {
@@ -1431,6 +1445,7 @@ export interface DB {
 	LFGPost: LFGPost;
 	MapPoolMap: MapPoolMap;
 	MapResult: MapResult;
+	ModAuditLog: ModAuditLog;
 	PlayerResult: PlayerResult;
 	PlusSuggestion: PlusSuggestion;
 	PlusTier: PlusTier;

@@ -1,6 +1,6 @@
 /**
  * Replay-browser header: same tag style as the live header, top line timestamp
- * ("3/7/2026 22:28") + stage, bottom line lobby + mode. The locale-formatted
+ * ("3/7/2026 22:28", "9/11/2026 7:52 PM") + stage, bottom line lobby + mode. The locale-formatted
  * timestamp is validated by shape and kept raw; the rest snaps to closed sets.
  */
 import type { ModeShort, StageId } from "~/modules/in-game-lists/types";
@@ -9,8 +9,9 @@ import type { Roi } from "../../canonical";
 import type { Mat } from "../../cv";
 import type { GlyphSet } from "../../glyphs";
 import { ALL_STAGE_ENTRIES, LOBBY_MODE_COMBOS } from "../../localized";
+import { all, type MatchSteps } from "../../match-steps";
 import { closestBy } from "../../text";
-import { readTagBand } from "../scoreboard/header";
+import { readTagBandSteps } from "../scoreboard/header";
 import { HEADER_BOTTOM_BAND, HEADER_TOP_BAND } from "./rois";
 
 export interface ParsedReplayHeader {
@@ -38,12 +39,20 @@ const MIN_MATCH_SCORE = 0.62;
 const TAG_DARK_MAX_LIFTED = 120;
 
 /**
- * Locale date ("3/7/2026", "7.3.2026", "2026/3/7") + time, rest = stage. A lone
- * space between skinny time digits is tolerated ("14:1 1") and stripped. Not
- * left-anchored: the battle log's rank icon reads as a junk glyph before the date.
+ * Locale date ("3/7/2026", "7.3.2026", "2026/3/7") + time, 12h clocks with
+ * AM/PM ("9/11/2026 7:52PM"; P can read as "o"), rest = stage. A lone space between skinny time
+ * digits is tolerated ("14:1 1") and stripped. Not left-anchored: the battle
+ * log's rank icon reads as a junk glyph before the date.
  */
 const TIMESTAMP_RE =
-	/(\d{1,4}[./-]\d{1,2}[./-]\d{1,4})\s+(\d(?: ?\d)?: ?\d ?\d)\s*(.*)$/;
+	/(\d{1,4}[./-]\d{1,2}[./-]\d{1,4})\s+(\d(?: ?\d)?: ?\d ?\d)(?:\s*([AP0]M))?\s*(.*)$/;
+
+/**
+ * The same with lone spaces between skinny date digits too ("9/1 1/2026"),
+ * tried after it: a junk glyph before the date could pass as its first digit.
+ */
+const TIMESTAMP_GAPPED_DATE_RE =
+	/(\d(?: ?\d){0,3}[./-]\d(?: ?\d)?[./-]\d(?: ?\d){0,3})\s+(\d(?: ?\d)?: ?\d ?\d)(?:\s*([AP0]M))?\s*(.*)$/;
 
 /**
  * Fused date-time ("22/8/202620:37"), tried after the spaced form. The date's
@@ -51,7 +60,7 @@ const TIMESTAMP_RE =
  * 20:28); no spurious-gap tolerance or a lazy match could steal a year digit.
  */
 const TIMESTAMP_FUSED_RE =
-	/(\d{1,4}[./-]\d{1,2}[./-]\d{1,4}?)(\d{1,2}:\d\d)\s*(.*)$/;
+	/(\d{1,4}[./-]\d{1,2}[./-]\d{1,4}?)(\d{1,2}:\d\d)(?:\s*([AP0]M))?\s*(.*)$/;
 
 interface TopBandParse {
 	reading: string;
@@ -80,11 +89,17 @@ function parseTopBand(reading: string): TopBandParse {
 		.replace(/[Oo]/g, "0")
 		.replace(/S/g, "5");
 	const m =
-		TIMESTAMP_RE.exec(normalized) ?? TIMESTAMP_FUSED_RE.exec(normalized);
+		TIMESTAMP_RE.exec(normalized) ??
+		TIMESTAMP_GAPPED_DATE_RE.exec(normalized) ??
+		TIMESTAMP_FUSED_RE.exec(normalized);
 	const stageReading = m
-		? reading.slice(reading.length - m[3]!.length)
+		? reading.slice(reading.length - m[4]!.length)
 		: reading;
-	if (m) timestamp = `${m[1]!} ${m[2]!.replace(/ /g, "")}`;
+	if (m) {
+		// P's bowl can read as "o", folded to "0" above
+		const meridiem = m[3] ? ` ${m[3].replace("0", "P")}` : "";
+		timestamp = `${m[1]!.replace(/ /g, "")} ${m[2]!.replace(/ /g, "")}${meridiem}`;
+	}
 	if (stageReading) {
 		const match = closestBy(
 			foldDigitLookalikes(stageReading),
@@ -114,44 +129,69 @@ const REPLAY_BANDS: ReplayHeaderBands = {
 	bottom: HEADER_BOTTOM_BAND,
 };
 
-export function parseReplayHeader(
+/** The top and bottom bands read in one lockstep; each band's lifted-ceiling retry follows its own first read. */
+export function* parseReplayHeaderSteps(
 	gray: Mat,
 	topGlyphs: GlyphSet,
 	bottomGlyphs: GlyphSet,
 	bands: ReplayHeaderBands = REPLAY_BANDS,
-): ParsedReplayHeader {
+	speculative = false,
+): MatchSteps<ParsedReplayHeader> {
 	const leadIn = {
 		tagLeadInMax: bands.tagLeadInMax,
 		tagColumnFraction: bands.tagColumnFraction,
 	};
-	let top = parseTopBand(readTagBand(gray, bands.top, topGlyphs, leadIn));
-	if (top.stage === null) {
-		const retry = parseTopBand(
-			readTagBand(gray, bands.top, topGlyphs, {
-				...leadIn,
-				tagDarkMax: TAG_DARK_MAX_LIFTED,
-			}),
+	const readTop = function* (): MatchSteps<ReturnType<typeof parseTopBand>> {
+		let top = parseTopBand(
+			yield* readTagBandSteps(gray, bands.top, topGlyphs, leadIn, speculative),
 		);
-		if (retry.stageScore >= top.stageScore) top = retry;
-	}
-
-	let bottomReading = readTagBand(gray, bands.bottom, bottomGlyphs, leadIn);
-	let bottomMatch = bottomReading
-		? closestBy(bottomReading, LOBBY_MODE_COMBOS, (c) => c.text)
-		: null;
-	if (!bottomMatch || bottomMatch.score < MIN_MATCH_SCORE) {
-		const reading = readTagBand(gray, bands.bottom, bottomGlyphs, {
-			...leadIn,
-			tagDarkMax: TAG_DARK_MAX_LIFTED,
-		});
-		const match = reading
-			? closestBy(reading, LOBBY_MODE_COMBOS, (c) => c.text)
-			: null;
-		if ((match?.score ?? 0) >= (bottomMatch?.score ?? 0)) {
-			bottomReading = reading;
-			bottomMatch = match;
+		if (top.stage === null) {
+			const retry = parseTopBand(
+				yield* readTagBandSteps(
+					gray,
+					bands.top,
+					topGlyphs,
+					{ ...leadIn, tagDarkMax: TAG_DARK_MAX_LIFTED },
+					speculative,
+				),
+			);
+			if (retry.stageScore >= top.stageScore) top = retry;
 		}
-	}
+		return top;
+	};
+	const readBottom = function* () {
+		let bottomReading = yield* readTagBandSteps(
+			gray,
+			bands.bottom,
+			bottomGlyphs,
+			leadIn,
+			speculative,
+		);
+		let bottomMatch = bottomReading
+			? closestBy(bottomReading, LOBBY_MODE_COMBOS, (c) => c.text)
+			: null;
+		if (!bottomMatch || bottomMatch.score < MIN_MATCH_SCORE) {
+			const reading = yield* readTagBandSteps(
+				gray,
+				bands.bottom,
+				bottomGlyphs,
+				{ ...leadIn, tagDarkMax: TAG_DARK_MAX_LIFTED },
+				speculative,
+			);
+			const match = reading
+				? closestBy(reading, LOBBY_MODE_COMBOS, (c) => c.text)
+				: null;
+			if ((match?.score ?? 0) >= (bottomMatch?.score ?? 0)) {
+				bottomReading = reading;
+				bottomMatch = match;
+			}
+		}
+		return { bottomReading, bottomMatch };
+	};
+	const [top, { bottomReading, bottomMatch }] = yield* all([
+		readTop(),
+		readBottom(),
+	]);
 
 	let lobby: ScannerLobby | null = null;
 	let mode: ModeShort | null = null;

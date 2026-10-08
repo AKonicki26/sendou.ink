@@ -1,6 +1,7 @@
 import { eachDayOfInterval, subDays } from "date-fns";
 import * as AdminRepository from "~/features/admin/AdminRepository.server";
 import * as ExternalStreamRepository from "~/features/admin/ExternalStreamRepository.server";
+import * as ModAuditLogRepository from "~/features/admin/ModAuditLogRepository.server";
 import * as ApiRepository from "~/features/api/ApiRepository.server";
 import * as ArtRepository from "~/features/art/ArtRepository.server";
 import * as AssociationRepository from "~/features/associations/AssociationRepository.server";
@@ -266,6 +267,9 @@ export function buildCases(fx: Fixtures): {
 			sortAbilities: true,
 		}),
 	);
+	addStatic("BuildRepository.countAllPublicByWeaponId", () =>
+		BuildRepository.countAllPublicByWeaponId(),
+	);
 
 	add(
 		"CalendarRepository.findAllBetweenTwoTimestamps",
@@ -319,6 +323,11 @@ export function buildCases(fx: Fixtures): {
 	);
 	add("ChatRepository.findMessageById", fx.heavyChatMessageId, (messageId) =>
 		ChatRepository.findMessageById(messageId),
+	);
+	add(
+		"ChatRepository.findAllParticipantsByUserIds",
+		fx.manyUserIds,
+		(userIds) => ChatRepository.findAllParticipantsByUserIds(userIds),
 	);
 	add(
 		"ChatRepository.findMessageStatsByRoomIds",
@@ -452,7 +461,7 @@ export function buildCases(fx: Fixtures): {
 		LiveStreamRepository.findByUserId(user.id),
 	);
 	addStatic("LiveStreamRepository.findXRankStreams", () =>
-		LiveStreamRepository.findXRankStreams(),
+		LiveStreamRepository.findXRankStreams(Seasons.currentOrPrevious()!.nth),
 	);
 
 	add("MatchProfileRepository.findSettingsByUserId", fx.heavyUser, (user) =>
@@ -514,6 +523,16 @@ export function buildCases(fx: Fixtures): {
 		"NotificationRepository.findAllSubscriptionsByUserIds",
 		fx.manyUserIds,
 		(userIds) => NotificationRepository.findAllSubscriptionsByUserIds(userIds),
+	);
+	add(
+		"NotificationRepository.findUserIdsWithUnseenByType",
+		both(fx.manyUserIds, fx.heavyChatRoomId),
+		([userIds, roomId]) =>
+			NotificationRepository.findUserIdsWithUnseenByType({
+				userIds,
+				type: "CHAT_MENTION",
+				meta: { roomId },
+			}),
 	);
 
 	add(
@@ -787,6 +806,12 @@ export function buildCases(fx: Fixtures): {
 	add("SQMatchRepository.findSeasonCanceledMatchesByUserId", fx.sq, (sq) =>
 		SQMatchRepository.findSeasonCanceledMatchesByUserId(sq),
 	);
+	add("ModAuditLogRepository.findSeasonByUserId", fx.sq, (sq) =>
+		ModAuditLogRepository.findSeasonByUserId({
+			...sq,
+			type: "SENDOUQ_PUBLIC_NOTE",
+		}),
+	);
 	add(
 		"SQMatchRepository.findCancelReportsByGroupMatchId",
 		fx.heavyGroupMatchId,
@@ -864,8 +889,8 @@ export function buildCases(fx: Fixtures): {
 	addStatic("SQGroupRepository.findRecentlyFinishedMatches", () =>
 		SQGroupRepository.findRecentlyFinishedMatches(),
 	);
-	addStatic("SQGroupRepository.findCurrentReceivedLikeCounts", () =>
-		SQGroupRepository.findCurrentReceivedLikeCounts(),
+	addStatic("SQGroupRepository.findCurrentReceivedLikerGroupIds", () =>
+		SQGroupRepository.findCurrentReceivedLikerGroupIds(),
 	);
 
 	addStatic("SplatoonRotationRepository.findAll", () =>
@@ -1356,6 +1381,12 @@ export function buildCases(fx: Fixtures): {
 		fx.heavyTournamentTeamId,
 		(tournamentTeamId) =>
 			TournamentTeamRepository.findInviteCodeById(tournamentTeamId),
+	);
+	add(
+		"TournamentTeamRepository.findAllChatRoomIdsByIds",
+		fx.heavyTournamentTeamId,
+		(tournamentTeamId) =>
+			TournamentTeamRepository.findAllChatRoomIdsByIds([tournamentTeamId]),
 	);
 	add("TournamentTeamRepository.isPickupAvatarImgId", fx.imageId, (imageId) =>
 		TournamentTeamRepository.isPickupAvatarImgId(imageId),

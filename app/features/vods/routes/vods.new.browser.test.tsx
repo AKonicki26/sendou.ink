@@ -10,6 +10,7 @@ import type {
 	ModeShort,
 	StageId,
 } from "~/modules/in-game-lists/types";
+import { localDateToDayMonthYear } from "~/utils/dates";
 import { vodFormBaseSchema } from "../vods-schemas";
 
 let mockFetcherData: { fieldErrors?: Record<string, string> } | undefined;
@@ -59,7 +60,7 @@ function createDefaultValues(overrides?: {
 	return {
 		youtubeUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
 		title: "Test VOD",
-		date: new Date(),
+		date: localDateToDayMonthYear(new Date()),
 		type: "TOURNAMENT" as const,
 		pov: { type: "USER" as const },
 		...overrides,
@@ -175,6 +176,19 @@ describe("VodForm", () => {
 
 			const fieldsets = screen.container.querySelectorAll("fieldset");
 			expect(fieldsets.length).toBe(2);
+		});
+
+		test("added match defaults to Splat Zones", async () => {
+			const screen = await renderForm();
+
+			const addButton = screen.getByRole("button", { name: "Add" });
+			await userEvent.click(addButton.element());
+
+			const addedFieldset = screen.container.querySelectorAll("fieldset")[1];
+			const checkedMode = addedFieldset.querySelector<HTMLInputElement>(
+				'input[type="radio"]:checked',
+			);
+			expect(checkedMode?.value).toBe("SZ");
 		});
 
 		test("can remove matches when more than 1", async () => {

@@ -50,6 +50,8 @@ export default [
 	index("features/front-page/routes/index.tsx"),
 	route("/patrons-list", "features/front-page/routes/patrons-list.ts"),
 
+	route("/health", "features/health/routes/health.ts"),
+
 	route("/sidenav", "features/layout/routes/sidenav.ts"),
 
 	route("/sse", "features/events/routes/sse.ts"),
@@ -138,6 +140,14 @@ export default [
 	route(
 		"/trophies/:id/tournaments",
 		"features/trophies/routes/trophies.$id.tournaments.ts",
+	),
+	route(
+		"/trophies/:id/placements/:userId",
+		"features/trophies/routes/trophies.$id.placements.$userId.ts",
+	),
+	route(
+		"/trophies/:id/backfill/:seriesId",
+		"features/trophies/routes/trophies.$id.backfill.$seriesId.ts",
 	),
 	route("/trophies", "features/trophies/routes/trophies.tsx", [
 		route(":id", "features/trophies/routes/trophies.$id.tsx"),
@@ -342,6 +352,10 @@ export default [
 	route(
 		"/api/chat/rooms/:id/read",
 		"features/chat/routes/api.chat.rooms.$id.read.ts",
+	),
+	route(
+		"/api/chat/rooms/:id/mentions/seen",
+		"features/chat/routes/api.chat.rooms.$id.mentions.seen.ts",
 	),
 	route("/api/layout", "features/layout/routes/api.layout.ts"),
 	route(

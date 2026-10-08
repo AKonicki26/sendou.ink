@@ -73,7 +73,6 @@ export const action: ActionFunction = async ({ request }) => {
 
 				notifyLikeReceived(data.targetGroupId);
 				revalidateGroupTopic(currentGroup.id);
-				notifyGroupStatusChanged(data.targetGroupId);
 				notifyGroupStatusChanged(currentGroup.id);
 
 				break;
@@ -115,7 +114,6 @@ export const action: ActionFunction = async ({ request }) => {
 
 				notifyLikeReceived(data.targetGroupId);
 				revalidateGroupTopic(currentGroup.id);
-				notifyGroupStatusChanged(data.targetGroupId);
 				break;
 			}
 			case "UNLIKE": {
@@ -128,7 +126,6 @@ export const action: ActionFunction = async ({ request }) => {
 
 				revalidateGroupTopic(data.targetGroupId);
 				revalidateGroupTopic(currentGroup.id);
-				notifyGroupStatusChanged(data.targetGroupId);
 				notifyGroupStatusChanged(currentGroup.id);
 
 				break;
@@ -205,7 +202,7 @@ export const action: ActionFunction = async ({ request }) => {
 				throw redirect(SENDOUQ_READY_PAGE);
 			}
 			case "LEAVE_GROUP": {
-				const { abortedReadyCheckGroupIds } =
+				const { abortedReadyCheckGroupIds, leftUserIds } =
 					await SQGroupRepository.leaveGroup(user.id);
 
 				await refreshSendouQInstance();
@@ -217,11 +214,13 @@ export const action: ActionFunction = async ({ request }) => {
 
 				const remainingGroup = SendouQ.findUncensoredGroupById(currentGroup.id);
 				if (remainingGroup?.chatRoomId) {
-					ChatSystemMessage.sendPersisted({
-						roomId: remainingGroup.chatRoomId,
-						type: "USER_LEFT",
-						authorUserId: user.id,
-					});
+					for (const leftUserId of leftUserIds) {
+						ChatSystemMessage.sendPersisted({
+							roomId: remainingGroup.chatRoomId,
+							type: "USER_LEFT",
+							authorUserId: leftUserId,
+						});
+					}
 				}
 
 				ChatSystemMessage.notifyRoomsChanged(
@@ -250,7 +249,9 @@ export const action: ActionFunction = async ({ request }) => {
 					(member) => member.id === data.userId,
 				);
 
-				await SQGroupRepository.leaveGroup(data.userId);
+				await SQGroupRepository.leaveGroup(data.userId, {
+					keepQuickAddedMembers: true,
+				});
 
 				await refreshSendouQInstance();
 
