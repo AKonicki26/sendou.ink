@@ -3,11 +3,12 @@ import { Config } from "~/config";
 import type { Tables } from "~/db/tables";
 import type { Notification } from "~/features/notifications/notifications-types";
 import type { MainWeaponId, ModeShort } from "~/modules/in-game-lists/types";
+import { toDBBoolean } from "~/utils/sql";
 import {
 	getArtFilename,
 	SEED_ART_URLS,
 } from "../../../../scripts/seed-art-urls";
-import { NZAP_TEST_DISCORD_ID } from "../constants";
+import { NZAP_TEST_DISCORD_ID, NZAP_YOUTUBE_ID } from "../constants";
 import { faker } from "../core/faker";
 import placements from "../data/placements.json";
 import * as ArtFactory from "../factories/ArtFactory";
@@ -63,8 +64,14 @@ export async function seedMisc({
 
 	const showcaseStreamerIds = users.showcaseIds.slice(0, STREAM_COUNT);
 	await LiveStreamFactory.replaceAll([
-		{ userId: users.nzapId, twitch: "nzap_stream" },
-		...showcaseStreamerIds.map((userId) => ({ userId })),
+		{ userId: users.nzapId, account: "nzap_stream" },
+		{ userId: users.nzapId, platform: "YOUTUBE", account: NZAP_YOUTUBE_ID },
+		...showcaseStreamerIds.flatMap(showcaseStreams),
+		...tournaments.castAccounts.map(({ platform, account }) => ({
+			userId: null,
+			platform,
+			account,
+		})),
 		// the league sets live right now have a member of theirs on, unless they already are
 		...tournaments.luti.streamerUserIds
 			.filter(
@@ -76,6 +83,21 @@ export async function seedMisc({
 	await SplatoonRotationFactory.replaceAll();
 
 	return { adminFriendIds: adminFriendIds(users) };
+}
+
+/** Mostly Twitch, every fifth streamer on YouTube instead and every fifth on both. */
+function showcaseStreams(
+	userId: number,
+	index: number,
+): Parameters<typeof LiveStreamFactory.replaceAll>[0] {
+	switch (index % 5) {
+		case 1:
+			return [{ userId, platform: "YOUTUBE" }];
+		case 3:
+			return [{ userId }, { userId, platform: "YOUTUBE" }];
+		default:
+			return [{ userId }];
+	}
 }
 
 async function seedXRankPlacements(users: SeededUsers) {
@@ -100,6 +122,7 @@ async function seedXRankPlacements(users: SeededUsers) {
 	}
 
 	for (const [i, placement] of NZAP_XP_TROPHY_PLACEMENTS.entries()) {
+		const isLast = i === NZAP_XP_TROPHY_PLACEMENTS.length - 1;
 		await XRankPlacementFactory.create(
 			{
 				...placement,
@@ -108,7 +131,7 @@ async function seedXRankPlacements(users: SeededUsers) {
 				playerSplId: NZAP_PLAYER_SPL_ID,
 				playerUserId: users.nzapId,
 			},
-			{ refreshPeakXp: i === NZAP_XP_TROPHY_PLACEMENTS.length - 1 },
+			{ refreshPeakXp: isLast, recalculateBuildSortValues: isLast },
 		);
 	}
 }
@@ -255,8 +278,8 @@ async function seedNotifications(
 			{
 				notification,
 				users: [
-					{ userId: users.adminId, seen: i <= 7 ? 1 : 0 },
-					{ userId: users.nzapId, seen: i <= 7 ? 1 : 0 },
+					{ userId: users.adminId, seen: toDBBoolean(i <= 7) },
+					{ userId: users.nzapId, seen: toDBBoolean(i <= 7) },
 				],
 			},
 			{ createdAt },

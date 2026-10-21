@@ -294,6 +294,7 @@
 
 .builds {
 	display: flex;
+	align-items: flex-start;
 	gap: var(--s-3);
 	overflow-x: auto;
 	padding-block: var(--s-2);
@@ -464,7 +465,12 @@
 	color: var(--color-text);
 }
 
+.liveStreamThumbnailLink {
+	display: block;
+}
+
 .liveStreamThumbnail {
+	display: block;
 	width: 100%;
 	aspect-ratio: 16 / 9;
 	object-fit: cover;
@@ -496,9 +502,17 @@
 .liveStreamName {
 	margin-inline-start: auto;
 	color: var(--color-text-high);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+}
+
+.liveStreamLinks {
+	margin-inline-start: auto;
+}
+
+.liveStreamPlatformIcon {
+	width: 1em;
+	height: 1em;
+	margin-inline-end: var(--s-1);
+	vertical-align: middle;
 }
 
 .countdownTitle {

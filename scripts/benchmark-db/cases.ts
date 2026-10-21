@@ -9,6 +9,7 @@ import * as LogInLinkRepository from "~/features/auth/LogInLinkRepository.server
 import * as AvailabilityRepository from "~/features/availability/AvailabilityRepository.server";
 import * as BadgeRepository from "~/features/badges/BadgeRepository.server";
 import * as BuildRepository from "~/features/builds/BuildRepository.server";
+import { RECENT_PATCHES } from "~/features/builds/builds-constants";
 import * as CalendarRepository from "~/features/calendar/CalendarRepository.server";
 import * as ChatRepository from "~/features/chat/ChatRepository.server";
 import * as ChatRoomResolver from "~/features/chat/ChatRoomResolver.server";
@@ -51,11 +52,24 @@ import * as TrophyRepository from "~/features/trophies/TrophyRepository.server";
 import * as UserCardRepository from "~/features/user-card/UserCardRepository.server";
 import * as UserRepository from "~/features/user-page/UserRepository.server";
 import * as VodRepository from "~/features/vods/VodRepository.server";
+import type { MainWeaponId } from "~/modules/in-game-lists/types";
+import {
+	weaponCategories,
+	weaponIdToCategory,
+} from "~/modules/in-game-lists/weapon-ids";
 import { LUTI_NAME_PREFIX } from "~/routines/computeLutiDivs";
 import { dateToDatabaseTimestamp, dateToYYYYMMDD } from "~/utils/dates";
 import type { Fixtures } from "./fixtures";
 
 const SEARCH_QUERY = { query: "s", limit: 25 };
+const LFG_NO_FILTERS = {
+	type: null,
+	weapons: [],
+	plusTier: null,
+	language: null,
+	timezones: null,
+	postIds: null,
+};
 
 export interface BenchmarkCase {
 	name: string;
@@ -247,25 +261,139 @@ export function buildCases(fx: Fixtures): {
 	add("BuildRepository.findOwnerIdById", fx.buildId, (buildId) =>
 		BuildRepository.findOwnerIdById(buildId),
 	);
-	addStatic("BuildRepository.findAllAbilityPointAverages.all", () =>
-		BuildRepository.findAllAbilityPointAverages(),
+	addStatic("BuildRepository.findAllAbilityPointSums", () =>
+		BuildRepository.findAllAbilityPointSums(RECENT_PATCHES.at(-1)!.date),
 	);
 	add(
-		"BuildRepository.findAllAbilityPointAverages.byWeapon",
-		fx.heavyWeaponSplId,
-		(weaponSplId) => BuildRepository.findAllAbilityPointAverages(weaponSplId),
-	);
-	add(
-		"BuildRepository.findAllPopularAbilitiesByWeaponId",
+		"BuildRepository.findAbilityPointCountsByWeaponIds",
 		fx.heavyWeaponSplId,
 		(weaponSplId) =>
-			BuildRepository.findAllPopularAbilitiesByWeaponId(weaponSplId),
+			BuildRepository.findAbilityPointCountsByWeaponIds({
+				weaponIds: categoryWeaponIds(weaponSplId),
+				updatedSince: RECENT_PATCHES.at(-1)!.date,
+			}),
 	);
-	add("BuildRepository.findAllByWeaponId", fx.heavyWeaponSplId, (weaponSplId) =>
-		BuildRepository.findAllByWeaponId(weaponSplId, {
-			limit: 60,
+	add(
+		"BuildRepository.findNewestBuildPerOwnerByWeaponId",
+		fx.heavyWeaponSplId,
+		(weaponSplId) =>
+			BuildRepository.findNewestBuildPerOwnerByWeaponId({
+				weaponId: weaponSplId,
+				updatedSince: RECENT_PATCHES.at(-1)!.date,
+			}),
+	);
+	add(
+		"BuildRepository.findPageByWeaponId",
+		fx.heavyWeaponSplId,
+		(weaponSplId) =>
+			BuildRepository.findPageByWeaponId({
+				weaponId: weaponSplId,
+				filters: { abilities: [], mode: null, date: null },
+				page: 1,
+				sortAbilities: true,
+			}),
+	);
+	// pages by author, so the authors before the page are read off the index first
+	add(
+		"BuildRepository.findPageByWeaponId.deepPage",
+		fx.heavyWeaponSplId,
+		(weaponSplId) =>
+			BuildRepository.findPageByWeaponId({
+				weaponId: weaponSplId,
+				filters: { abilities: [], mode: null, date: null },
+				page: 50,
+				sortAbilities: true,
+			}),
+	);
+	// rare abilities match almost nothing, so every build of the weapon is checked
+	add(
+		"BuildRepository.findPageByWeaponId.rareFilters",
+		fx.heavyWeaponSplId,
+		(weaponSplId) =>
+			BuildRepository.findPageByWeaponId({
+				weaponId: weaponSplId,
+				filters: {
+					abilities: [
+						{ type: "HAS", ability: "AD" },
+						{ type: "HAS", ability: "TI" },
+						{ type: "HAS", ability: "RP" },
+					],
+					mode: "TC",
+					date: null,
+				},
+				page: 1,
+				sortAbilities: true,
+			}),
+	);
+	add(
+		"BuildRepository.findPageByWeaponId.apFilters",
+		fx.heavyWeaponSplId,
+		(weaponSplId) =>
+			BuildRepository.findPageByWeaponId({
+				weaponId: weaponSplId,
+				filters: {
+					abilities: [
+						{ type: "AT_LEAST", ability: "ISM", ap: 10 },
+						{ type: "AT_MOST", ability: "SSU", ap: 6 },
+						{ type: "HAS_NOT", ability: "LDE" },
+					],
+					mode: null,
+					date: null,
+				},
+				page: 1,
+				sortAbilities: true,
+			}),
+	);
+	add("BuildRepository.findPageByUserId", fx.heavyBuildUserId, (userId) =>
+		BuildRepository.findPageByUserId({
+			userId,
+			showPrivate: true,
+			filters: {
+				abilities: [],
+				mode: null,
+				date: null,
+				weaponId: null,
+				visibility: null,
+			},
+			sorting: {
+				buildSorting: [
+					"WEAPON_POOL",
+					"MODE",
+					"TOP_500",
+					"WEAPON_IN_GAME_ORDER",
+					"UPDATED_AT",
+				],
+				weaponPool: [40, 1010, 2070, 3010],
+			},
+			page: 1,
 			sortAbilities: true,
 		}),
+	);
+	add(
+		"BuildRepository.findPageByUserId.rareFilters",
+		fx.heavyBuildUserId,
+		(userId) =>
+			BuildRepository.findPageByUserId({
+				userId,
+				showPrivate: true,
+				filters: {
+					abilities: [
+						{ type: "HAS", ability: "AD" },
+						{ type: "HAS", ability: "TI" },
+						{ type: "HAS", ability: "RP" },
+					],
+					mode: "TC",
+					date: null,
+					weaponId: null,
+					visibility: null,
+				},
+				sorting: { buildSorting: null, weaponPool: [40] },
+				page: 1,
+				sortAbilities: true,
+			}),
+	);
+	add("BuildRepository.countsByUserId", fx.heavyBuildUserId, (userId) =>
+		BuildRepository.countsByUserId(userId, { showPrivate: true }),
 	);
 	addStatic("BuildRepository.countAllPublicByWeaponId", () =>
 		BuildRepository.countAllPublicByWeaponId(),
@@ -423,9 +551,6 @@ export function buildCases(fx: Fixtures): {
 			onlyOneEntryPerUser: true,
 		}),
 	);
-	add("LeaderboardRepository.hasEnoughSqMatchesByUserId", fx.sq, (sq) =>
-		LeaderboardRepository.hasEnoughSqMatchesByUserId(sq.userId),
-	);
 	add("LeaderboardRepository.findSeasonsParticipatedInByUserId", fx.sq, (sq) =>
 		LeaderboardRepository.findSeasonsParticipatedInByUserId(sq.userId),
 	);
@@ -447,11 +572,41 @@ export function buildCases(fx: Fixtures): {
 		LeaderboardRepository.findSeasonPopularUsersWeapon(sq.season),
 	);
 
-	addStatic("LFGRepository.findAllPosts.anon", () =>
-		LFGRepository.findAllPosts(),
+	addStatic("LFGRepository.findBoardPage", () =>
+		LFGRepository.findBoardPage({
+			filters: LFG_NO_FILTERS,
+			page: 1,
+			pageSize: 24,
+			containingPostId: null,
+		}),
 	);
-	add("LFGRepository.findAllPosts.loggedIn", fx.heavyUser, (user) =>
-		LFGRepository.findAllPosts({ id: user.id, plusTier: 1 }),
+	add("LFGRepository.findBoardPage.containing", fx.lfgPostId, (postId) =>
+		LFGRepository.findBoardPage({
+			filters: LFG_NO_FILTERS,
+			page: 1,
+			pageSize: 24,
+			containingPostId: postId,
+		}),
+	);
+	addStatic("LFGRepository.findBoardPage.filtered", () =>
+		LFGRepository.findBoardPage({
+			filters: {
+				...LFG_NO_FILTERS,
+				weapons: [40, 1010],
+				plusTier: 3,
+				language: "en",
+			},
+			page: 1,
+			pageSize: 24,
+			containingPostId: null,
+		}),
+	);
+	add("LFGRepository.findVisibleById", fx.lfgPostId, (postId) =>
+		LFGRepository.findVisibleById(postId),
+	);
+	addStatic("LFGRepository.findAllOwn", () => LFGRepository.findAllOwn());
+	addStatic("LFGRepository.findAllVisibleParticipantIds", () =>
+		LFGRepository.findAllVisibleParticipantIds(),
 	);
 	add("LFGRepository.findByAuthorUserId", fx.lfgAuthorId, (authorId) =>
 		LFGRepository.findByAuthorUserId(authorId),
@@ -653,10 +808,10 @@ export function buildCases(fx: Fixtures): {
 			ScannerIngestRepository.findScoreboardsByGroupMatchId(groupMatchId),
 	);
 	add(
-		"ScannerIngestRepository.gamesInTournamentMatch",
+		"ScannerIngestRepository.gamesInTournamentMatches",
 		fx.heavyTournamentMatchId,
 		(tournamentMatchId) =>
-			ScannerIngestRepository.gamesInTournamentMatch(tournamentMatchId),
+			ScannerIngestRepository.gamesInTournamentMatches([tournamentMatchId]),
 	);
 
 	add(
@@ -1304,10 +1459,10 @@ export function buildCases(fx: Fixtures): {
 			TournamentRepository.findRelatedUsersByTournamentIds(tournamentIds),
 	);
 	add(
-		"TournamentRepository.findParticipantTwitchAccounts",
+		"TournamentRepository.findParticipantStreamAccounts",
 		fx.recentTournamentIds,
 		(tournamentIds) =>
-			TournamentRepository.findParticipantTwitchAccounts(tournamentIds),
+			TournamentRepository.findParticipantStreamAccounts(tournamentIds),
 	);
 	addStatic("TournamentRepository.findAllForShowcase", () =>
 		TournamentRepository.findAllForShowcase(),
@@ -1554,10 +1709,9 @@ export function buildCases(fx: Fixtures): {
 		UserRepository.findSocialLinksByUserId(user.id),
 	);
 	add(
-		"UserRepository.findIdsByTwitchUsernames",
-		fx.twitchUsernames,
-		(twitchUsernames) =>
-			UserRepository.findIdsByTwitchUsernames(twitchUsernames),
+		"UserRepository.findIdsByStreamAccounts",
+		fx.streamAccounts,
+		(streamAccounts) => UserRepository.findIdsByStreamAccounts(streamAccounts),
 	);
 
 	add("VodRepository.findByUserId", fx.vod, (vod) =>
@@ -1579,4 +1733,10 @@ function both<A, B>(a: A | null, b: B | null): [A, B] | null {
 	if (a === null || b === null) return null;
 
 	return [a, b];
+}
+
+function categoryWeaponIds(weaponSplId: MainWeaponId) {
+	const category = weaponIdToCategory(weaponSplId);
+
+	return [...weaponCategories.find(({ name }) => name === category)!.weaponIds];
 }

@@ -163,18 +163,19 @@
 	line-height: 1;
 	padding: 5px var(--s-3);
 	border-radius: var(--radius-full);
-	background: color-mix(in oklab, var(--color-bg) 72%, transparent);
+	background: var(--color-bg-overlay);
 	backdrop-filter: blur(8px);
+	color: var(--color-text-on-dark);
 }
 
 .win {
-	color: var(--color-success-high);
+	color: var(--color-success);
 	font-size: var(--font-2xs);
 	letter-spacing: 0.08em;
 }
 
 .loss {
-	color: var(--color-error-high);
+	color: var(--color-error);
 	font-size: var(--font-2xs);
 	letter-spacing: 0.08em;
 }
@@ -185,7 +186,7 @@
 }
 
 .scoreDash {
-	color: var(--color-text-high);
+	opacity: 0.7;
 }
 
 .kds {
@@ -194,8 +195,9 @@
 	font-size: var(--font-xs);
 	padding: var(--s-0-5) var(--s-2);
 	border-radius: var(--radius-full);
-	background: color-mix(in oklab, var(--color-bg) 72%, transparent);
+	background: var(--color-bg-overlay);
 	backdrop-filter: blur(8px);
+	color: var(--color-text-on-dark);
 }
 
 .teamWeapons {
@@ -215,14 +217,6 @@
 	font-size: var(--font-2xs);
 	font-weight: var(--weight-semi);
 	color: var(--color-text-high);
-}
-
-.weapon {
-	width: 32px;
-	height: 32px;
-	background: var(--color-bg-higher);
-	border-radius: var(--radius-full);
-	padding: 2px;
 }
 
 .weaponBackdrop {
@@ -261,11 +255,11 @@
 	align-items: center;
 	gap: var(--s-1);
 	padding: var(--s-0-5) var(--s-2);
-	border: var(--border-style);
+	border: none;
 	border-radius: var(--radius-full);
-	background: color-mix(in oklab, var(--color-bg) 72%, transparent);
+	background: var(--color-bg-overlay);
 	backdrop-filter: blur(8px);
-	color: var(--color-text);
+	color: var(--color-text-on-dark);
 	font: inherit;
 	font-size: var(--font-2xs);
 	font-weight: var(--weight-bold);
@@ -273,7 +267,7 @@
 	cursor: pointer;
 
 	&:hover {
-		color: var(--color-fg-accent);
+		background: var(--color-bg-overlay-high);
 	}
 
 	&:focus-visible {
@@ -282,16 +276,16 @@
 }
 
 /* the shared circle button, translucent over the banner */
-button.circle {
+:is(button, a).circle {
 	flex-shrink: 0;
 	width: 28px;
 	height: 28px;
 	padding: 0;
 	border: none;
 	border-radius: var(--radius-full);
-	background: color-mix(in oklab, var(--color-bg) 55%, transparent);
+	background: var(--color-bg-overlay);
 	backdrop-filter: blur(8px);
-	color: var(--color-text-high);
+	color: var(--color-text-on-dark);
 
 	& svg {
 		width: var(--field-size-icon);
@@ -299,8 +293,8 @@ button.circle {
 	}
 
 	&:hover {
-		color: var(--color-text);
-		background: color-mix(in oklab, var(--color-bg) 78%, transparent);
+		color: var(--color-text-on-dark);
+		background: var(--color-bg-overlay-high);
 	}
 }
 
@@ -371,23 +365,21 @@ button.expand {
 		padding: var(--s-1);
 		vertical-align: middle;
 	}
+}
 
-	& .weapon {
-		width: 36px;
-		height: 36px;
+/* global img max-width: 100% would let the table shrink the badge to nothing */
+.weaponCell {
+	width: 48px;
+
+	& > * {
+		min-width: 36px;
 	}
 }
 
-/* the round weapon badge plus the cell padding, so the image is never squeezed */
-.weaponCell {
-	width: 48px;
-}
-
+/* zero max-width + full width: the name takes only the leftover space and truncates */
 .name {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	max-width: 12rem;
+	width: 100%;
+	max-width: 0;
 }
 
 .num {
@@ -434,9 +426,6 @@ button.expand {
 .rowLabel {
 	flex: 1;
 	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
 }
 
 .streak {

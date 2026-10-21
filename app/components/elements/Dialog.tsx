@@ -95,8 +95,21 @@ function DialogElement({
 			onSubmit={(e) => e.stopPropagation()}
 			{...backdropPressHandlers}
 		>
+			<InitialFocusSink />
 			{children}
 		</dialog>
+	);
+}
+
+// Opening natively focuses the first control (Chromium ignores `autofocus` on the dialog itself),
+// and then moving focus to the dialog blurs it, which e.g. shows a required field's error at once
+function InitialFocusSink() {
+	return (
+		<span
+			ref={(sink) => sink?.setAttribute("autofocus", "")}
+			tabIndex={-1}
+			className={styles.initialFocusSink}
+		/>
 	);
 }
 
@@ -276,8 +289,12 @@ function TriggeredDialog({
 				command: "show-modal",
 				onClick: (event) => {
 					trigger.props.onClick?.(event);
-					if (!supportsInvokerCommands()) {
-						dialogRef.current?.showModal();
+					const dialog = document.getElementById(dialogId);
+					if (
+						!supportsInvokerCommands() &&
+						dialog instanceof HTMLDialogElement
+					) {
+						dialog.showModal();
 					}
 				},
 			})}

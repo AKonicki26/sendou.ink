@@ -21,6 +21,7 @@ import {
 } from "~/utils/dates";
 import {
 	errorToastIfFalsy,
+	notFound,
 	notFoundIfNullish,
 	parseParams,
 } from "~/utils/remix.server";
@@ -84,11 +85,13 @@ export async function fetchTournamentStreams(
 		await TournamentRepository.findStreamsByTournamentId(tournamentId);
 
 	const memberStreams = participantStreams.map((stream) => ({
+		platform: stream.platform,
+		account: stream.account,
+		videoId: stream.videoId,
 		thumbnailUrl: stream.thumbnailUrl,
-		twitchUserName: stream.twitch,
 		viewerCount: stream.viewerCount,
 		userId: stream.userId as number | null,
-		teamName: stream.teamName as string | null,
+		teamId: stream.teamId as number | null,
 		user: {
 			id: stream.id,
 			username: stream.username,
@@ -100,11 +103,13 @@ export async function fetchTournamentStreams(
 	}));
 
 	const casts = castStreams.map((stream) => ({
+		platform: stream.platform,
+		account: stream.account,
+		videoId: stream.videoId,
 		thumbnailUrl: stream.thumbnailUrl,
-		twitchUserName: stream.twitch!,
 		viewerCount: stream.viewerCount,
 		userId: null,
-		teamName: null,
+		teamId: null,
 		user: null,
 	}));
 
@@ -155,7 +160,7 @@ export function requireTournamentVisible({
 	if (!ctx.settings.isDraft) return;
 	if (hasPermission(ctx, "ORGANIZE", user)) return;
 
-	throw new Response(null, { status: 404 });
+	notFound();
 }
 
 type TournamentFriendCodeCtx = Pick<
@@ -365,7 +370,7 @@ export function serializeBracket(
 		teamsPendingCheckIn: bracket.teamsPendingCheckIn,
 		createdAt: bracket.createdAt ?? null,
 		sources: bracket.sources,
-		seeding: bracket.seeding,
+		previewSeeding: bracket.previewSeeding,
 		settings: bracket.settings,
 		requiresCheckIn: bracket.requiresCheckIn,
 		startTime: bracket.startTime
@@ -565,6 +570,7 @@ function hasImminentBracket(tournament: Tournament) {
 }
 
 function isTournamentLive(tournament: Tournament) {
+	if (tournament.isTest) return false;
 	if (!tournament.hasStarted || tournament.everyBracketOver) return false;
 	if (hasImminentBracket(tournament)) return true;
 

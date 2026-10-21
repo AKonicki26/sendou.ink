@@ -5,20 +5,25 @@ import type { Tables } from "~/db/tables";
 import * as Availability from "~/features/availability/core/Availability";
 import * as ChatRepository from "~/features/chat/ChatRepository.server";
 import type { ChatRoomType } from "~/features/chat/chat-types";
+import { LFG } from "~/features/lfg/lfg-constants";
 import type { SkillTeamIdentifier } from "~/features/mmr/mmr-utils";
 import type {
 	MainWeaponId,
 	ModeShort,
 	StageId,
 } from "~/modules/in-game-lists/types";
-import { databaseTimestampNow, databaseTimestampToDate } from "~/utils/dates";
+import {
+	databaseTimestampNow,
+	databaseTimestampToDate,
+	dateToDatabaseTimestamp,
+} from "~/utils/dates";
 import { logger } from "~/utils/logger";
 
 export interface Fixtures {
 	heavyUser: { id: number; identifier: string } | null;
 	userCustomUrl: string | null;
 	friendCode: string | null;
-	twitchUsernames: string[] | null;
+	streamAccounts: { twitchNames: string[]; youtubeIds: string[] } | null;
 	heavyBuildUserId: number | null;
 	buildId: number | null;
 	heavyWeaponSplId: MainWeaponId | null;
@@ -105,6 +110,7 @@ export interface Fixtures {
 		inviteCode: string;
 	} | null;
 	lfgAuthorId: number | null;
+	lfgPostId: number | null;
 	lfgTournament: { tournamentId: number; teamId: number } | null;
 	auditTournamentId: number | null;
 	xrank: {
@@ -152,7 +158,7 @@ export async function resolveFixtures(): Promise<Fixtures> {
 		heavyUser,
 		userCustomUrl: await resolveUserCustomUrl(),
 		friendCode: await resolveFriendCode(),
-		twitchUsernames: await resolveTwitchUsernames(),
+		streamAccounts: await resolveStreamAccounts(),
 		heavyBuildUserId: await resolveHeavyBuildUserId(),
 		buildId: await resolveBuildId(),
 		heavyWeaponSplId: await resolveHeavyWeaponSplId(),
@@ -204,6 +210,7 @@ export async function resolveFixtures(): Promise<Fixtures> {
 		notification: await resolveNotification(),
 		heavyAssociation: await resolveHeavyAssociation(),
 		lfgAuthorId: await resolveLfgAuthorId(),
+		lfgPostId: await resolveLfgPostId(),
 		lfgTournament: await resolveLfgTournament(),
 		auditTournamentId: (await resolveAuditTournamentId()) ?? heavyTournamentId,
 		xrank: await resolveXRank(),
@@ -276,16 +283,23 @@ async function resolveFriendCode() {
 	return row?.friendCode ?? null;
 }
 
-async function resolveTwitchUsernames() {
+async function resolveStreamAccounts() {
 	const rows = await db
 		.selectFrom("User")
-		.select("twitch")
-		.where("twitch", "is not", null)
-		.limit(20)
+		.select(["twitch", "youtubeId"])
+		.where((eb) =>
+			eb.or([eb("twitch", "is not", null), eb("youtubeId", "is not", null)]),
+		)
+		.limit(40)
 		.execute();
-	const usernames = rows.flatMap((row) => (row.twitch ? [row.twitch] : []));
+	const twitchNames = rows.flatMap((row) => (row.twitch ? [row.twitch] : []));
+	const youtubeIds = rows.flatMap((row) =>
+		row.youtubeId ? [row.youtubeId] : [],
+	);
 
-	return usernames.length > 0 ? usernames : null;
+	return twitchNames.length > 0 || youtubeIds.length > 0
+		? { twitchNames, youtubeIds }
+		: null;
 }
 
 async function resolveHeavyBuildUserId() {
@@ -1166,6 +1180,26 @@ async function resolveLfgAuthorId() {
 		.executeTakeFirst();
 
 	return row?.authorId ?? null;
+}
+
+/** The least recently bumped post still on the board, the furthest page from its start. */
+async function resolveLfgPostId() {
+	const row = await db
+		.selectFrom("LFGPost")
+		.select("id")
+		.where(
+			"updatedAt",
+			">",
+			dateToDatabaseTimestamp(
+				sub(new Date(), { days: LFG.POST_FRESHNESS_DAYS }),
+			),
+		)
+		.where("plusTierVisibility", "is", null)
+		.orderBy("updatedAt", "asc")
+		.limit(1)
+		.executeTakeFirst();
+
+	return row?.id ?? null;
 }
 
 async function resolveLfgTournament() {

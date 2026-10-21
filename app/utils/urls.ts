@@ -57,12 +57,12 @@ export const resolveAvatarUrl = ({
 export const SENDOU_INK_BASE_URL = "https://sendou.ink";
 
 export const BADGES_DOC_LINK =
-	"https://github.com/sendou-ink/sendou.ink/blob/rewrite/docs/badges.md";
+	"https://github.com/sendou-ink/sendou.ink/blob/main/docs/badges.md";
 export const API_DOC_LINK =
-	"https://github.com/sendou-ink/sendou.ink/blob/rewrite/docs/dev/api.md";
+	"https://github.com/sendou-ink/sendou.ink/blob/main/docs/dev/api.md";
 
 export const CREATING_TOURNAMENT_DOC_LINK =
-	"https://github.com/sendou-ink/sendou.ink/blob/rewrite/docs/tournament-creation.md";
+	"https://github.com/sendou-ink/sendou.ink/blob/main/docs/tournament-creation.md";
 
 export const PLUS_SERVER_DISCORD_URL = "https://discord.gg/FW4dKrY";
 export const SENDOU_INK_DISCORD_URL = "https://discord.gg/sendou";
@@ -102,6 +102,7 @@ export const FAQ_PAGE = "/faq";
 export const WELCOME_PAGE = "/welcome";
 export const SUPPORT_PAGE = "/support";
 export const CONTRIBUTIONS_PAGE = "/contributions";
+export const TRANSLATE_PAGE = "/translate";
 export const BADGES_PAGE = "/badges";
 export const TROPHIES_PAGE = "/trophies";
 export const NEW_TROPHY_PAGE = "/trophies/new";
@@ -234,6 +235,10 @@ export const chatRoomReadRoute = (roomId: number) =>
 export const chatRoomMentionsSeenRoute = (roomId: number) =>
 	`${chatRoomDataRoute(roomId)}/mentions/seen`;
 
+export const voiceRoomDataRoute = (roomId: number) =>
+	`/api/voice/rooms/${roomId}`;
+export const VOICE_TELEMETRY_ROUTE = "/api/voice/telemetry";
+
 export const userCardFriendshipPage = (userId: number) =>
 	`/user-card/${userId}/friendship`;
 
@@ -262,6 +267,11 @@ export interface UserLinkArgs {
 	customUrl?: Tables["User"]["customUrl"];
 }
 
+export const translatePage = (language: string) =>
+	`${TRANSLATE_PAGE}/${language}`;
+export const sourceFileUrl = (filePath: string) =>
+	`${SENDOU_INK_GITHUB_URL}/blob/main/${filePath}`;
+
 export const userPage = (user: UserLinkArgs) =>
 	`/u/${user.customUrl ?? user.discordId}`;
 export const userEditProfilePage = (user: UserLinkArgs) =>
@@ -282,12 +292,15 @@ export const manageTeamRosterPage = (customUrl: string) =>
 	`${teamPage(customUrl)}/roster`;
 export const teamSchedulePage = (customUrl: string) =>
 	`${teamPage(customUrl)}/schedule`;
+export const teamResultsPage = (customUrl: string) =>
+	`${teamPage(customUrl)}/results`;
 
 export const authErrorUrl = (errorCode: AuthErrorCode) =>
 	`/?authError=${errorCode}`;
 export const impersonateUrl = (idToLogInAs: number) =>
 	`/auth/impersonate?id=${idToLogInAs}`;
 export const badgePage = (badgeId: number) => `${BADGES_PAGE}/${badgeId}`;
+export const badgeEditPage = (badgeId: number) => `${badgePage(badgeId)}/edit`;
 
 export const weaponBuildPage = (weaponSlug: string) =>
 	`${BUILDS_PAGE}/${weaponSlug}`;
@@ -513,8 +526,14 @@ export const isCustomUrl = (value: string) => {
 };
 
 export function vodUrl(vod: {
+	platform: Tables["TournamentMatchVod"]["platform"];
 	platformVideoId: string;
 	timestampSeconds: number;
 }) {
-	return `https://www.twitch.tv/videos/${vod.platformVideoId}?t=${vod.timestampSeconds}s`;
+	switch (vod.platform) {
+		case "TWITCH":
+			return `https://www.twitch.tv/videos/${vod.platformVideoId}?t=${vod.timestampSeconds}s`;
+		case "YOUTUBE":
+			return `https://www.youtube.com/watch?v=${vod.platformVideoId}&t=${vod.timestampSeconds}s`;
+	}
 }

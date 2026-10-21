@@ -5,6 +5,7 @@ import * as Availability from "~/features/availability/core/Availability";
 import * as VisibleSchedules from "~/features/availability/core/VisibleSchedules.server";
 import type { RouteChatRoomInput } from "~/features/chat/chat-types";
 import * as RouteChatRooms from "~/features/chat/RouteChatRooms.server";
+import * as MatchProfileRepository from "~/features/match-profile/MatchProfileRepository.server";
 import { resolveNotifications } from "~/features/notifications/core/resolve.server";
 import * as ScannerIngestRepository from "~/features/scanner-ingest/ScannerIngestRepository.server";
 import * as ReportedWeaponRepository from "~/features/sendouq-match/ReportedWeaponRepository.server";
@@ -19,6 +20,7 @@ import {
 	tournamentTeamsFullCached,
 } from "~/features/tournament-bracket/core/Tournament.server";
 import { matchPageParamsSchema } from "~/features/tournament-bracket/tournament-bracket-schemas";
+import { showsOneGroupAtATime } from "~/features/tournament-bracket/tournament-bracket-utils";
 import * as UserCardRepository from "~/features/user-card/UserCardRepository.server";
 import * as UserRepository from "~/features/user-page/UserRepository.server";
 import { cache, IN_MILLISECONDS, ttl } from "~/utils/cache.server";
@@ -26,7 +28,7 @@ import { databaseTimestampNow } from "~/utils/dates";
 import { IS_E2E_TEST_RUN } from "~/utils/e2e";
 import { logger } from "~/utils/logger";
 import type { SerializeFrom } from "~/utils/remix";
-import { notFoundIfNullish, parseParams } from "~/utils/remix.server";
+import { notFound, notFoundIfNullish, parseParams } from "~/utils/remix.server";
 import { executeRoll } from "../core/executeRoll.server";
 import * as LeagueScheduling from "../core/LeagueScheduling";
 import { mapListFromResults, resolveMapList } from "../core/mapList.server";
@@ -54,12 +56,12 @@ export const loader = async ({ params }: LoaderFunctionArgs) => {
 	);
 
 	if (match.tournamentId !== tournamentId) {
-		throw new Response(null, { status: 404 });
+		notFound();
 	}
 
 	const isBye = !match.opponentOne || !match.opponentTwo;
 	if (isBye) {
-		throw new Response(null, { status: 404 });
+		notFound();
 	}
 
 	let pickBanEvents = match.roundMaps?.pickBan
@@ -204,6 +206,12 @@ export const loader = async ({ params }: LoaderFunctionArgs) => {
 		},
 		results,
 		reportedWeapons,
+		viewerWeaponPoolIds:
+			user && isParticipant
+				? (await MatchProfileRepository.findWeaponPoolByUserId(user.id)).map(
+						(weapon) => weapon.weaponSplId,
+					)
+				: null,
 		ingestedScoreboards,
 		mapList,
 		teams: [match.opponentOne?.id, match.opponentTwo?.id].flatMap(
@@ -238,6 +246,8 @@ export const loader = async ({ params }: LoaderFunctionArgs) => {
 			groupNumber:
 				bracket?.data.group.find((group) => group.id === match.groupId)
 					?.number ?? null,
+			bracketsPageGroupId:
+				bracket && showsOneGroupAtATime(bracket) ? match.groupId : null,
 			hasRoundRobin: tournament.bracketsMeta.some(
 				(meta) => meta.type === "round_robin",
 			),

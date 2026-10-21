@@ -106,6 +106,13 @@ export const MINIMAP_ABILITY_INK_THRESHOLD = 90;
 /** BlitzMain caps measure 28-29px on every card (self included). */
 export const NAME_TEXT_HEIGHT = 29;
 export const NAME_BIN_THRESHOLD = 170;
+/**
+ * Overlay cards are translucent: bright ink behind one lifts the name band's
+ * median (~180 vs <=144 clean), so the threshold rides above it. 26-36 reads
+ * the attested 720p card: under, backdrop specks read as glyphs; over, thin
+ * strokes break.
+ */
+export const NAME_BIN_SURFACE_MARGIN = 31;
 /** A fullwidth bracket reads level with its ASCII twin ("[K]yo!" 0.015 apart). */
 export const NAME_PLAIN_TIE_MARGIN = 0.02;
 
@@ -199,6 +206,11 @@ export const GATE_CLOSE_DARK_PROBES: readonly Roi[] = [
 	{ x: 58, y: 88, w: 14, h: 20 },
 	{ x: 132, y: 88, w: 14, h: 20 },
 ];
+/**
+ * A pale backdrop shows past the disc's rim while it pops in (tapped open
+ * mid super jump: the bottom probe reads 158), so one ring probe may miss.
+ */
+export const GATE_CLOSE_RING_MAX_BRIGHT_PROBES = 1;
 /** The white jump-arrows icon left of the (localized) pill label. */
 export const GATE_SPAWN_BRIGHT: Roi = { x: 888, y: 963, w: 60, h: 60 };
 export const GATE_SPAWN_DARK_PROBES: readonly Roi[] = [

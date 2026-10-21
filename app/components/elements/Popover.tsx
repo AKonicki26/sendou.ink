@@ -3,6 +3,7 @@ import * as React from "react";
 import { flushSync } from "react-dom";
 import { useHydrated } from "~/hooks/useHydrated";
 import { useIsomorphicLayoutEffect } from "~/hooks/useIsomorphicLayoutEffect";
+import { useLatestRef } from "~/hooks/useLatestRef";
 import styles from "./Popover.module.css";
 import { type FloatingPlacement, useFloatingLayer } from "./useFloatingLayer";
 import { useScrollIntoView } from "./useScrollIntoView";
@@ -47,8 +48,7 @@ export function useShowPopoverOnOpen({
 	onOpen: () => void;
 }) {
 	const showingRef = React.useRef(false);
-	const onOpenRef = React.useRef(onOpen);
-	onOpenRef.current = onOpen;
+	const onOpenRef = useLatestRef(onOpen);
 
 	useIsomorphicLayoutEffect(() => {
 		const popover = popoverRef.current;
@@ -89,8 +89,7 @@ export function focusLeftTo(
  * Popover opened by `trigger` (a SendouButton); controlled or uncontrolled. Renders through the
  * native popover API, placed next to the trigger by `useFloatingLayer`.
  *
- * With `eager` the content is rendered while closed too, so it is in the server markup and there
- * is nothing left to mount when the popover opens.
+ * Opening focuses the popover, or the element inside it marked with `data-autofocus`.
  */
 export function SendouPopover({
 	children,
@@ -99,7 +98,6 @@ export function SendouPopover({
 	placement,
 	onOpenChange,
 	isOpen,
-	eager,
 }: {
 	children: React.ReactNode;
 	trigger: React.ReactElement<Record<string, unknown>>;
@@ -107,7 +105,6 @@ export function SendouPopover({
 	placement?: PopoverPlacement;
 	onOpenChange?: (isOpen: boolean) => void;
 	isOpen?: boolean;
-	eager?: boolean;
 }) {
 	const popoverId = `${React.useId()}-popover`;
 	const popoverTriggerProps = usePopoverTriggerPropsOnceHydrated(popoverId);
@@ -125,24 +122,10 @@ export function SendouPopover({
 		}
 		onOpenChange?.(next);
 	};
-	const setOpenRef = React.useRef(setOpen);
-	setOpenRef.current = setOpen;
 
-	const hasSyncedRef = React.useRef(false);
 	React.useEffect(() => {
 		const popover = popoverRef.current;
-		if (!popover) return;
-		const domOpen = popover.matches(":popover-open");
-		const isFirstSync = !hasSyncedRef.current;
-		hasSyncedRef.current = true;
-
-		if (domOpen === open) return;
-		// opened before hydration: adopt it rather than closing it under the user
-		if (isFirstSync && domOpen) {
-			setOpenRef.current(true);
-			return;
-		}
-		if (!open) {
+		if (!open && popover?.matches(":popover-open")) {
 			popover.hidePopover();
 		}
 	}, [open]);
@@ -171,7 +154,9 @@ export function SendouPopover({
 			setOpen(next);
 		}
 		if (next) {
-			popoverRef.current?.focus();
+			const autoFocusTarget =
+				popoverRef.current?.querySelector<HTMLElement>("[data-autofocus]");
+			(autoFocusTarget ?? popoverRef.current)?.focus();
 		}
 	};
 
@@ -208,7 +193,7 @@ export function SendouPopover({
 				onToggle={onToggle}
 				onBlur={onBlur}
 			>
-				{open || eager ? children : null}
+				{open ? children : null}
 			</div>
 		</>
 	);
@@ -259,7 +244,9 @@ export function SendouAnchoredPopover({
 			onOpenChange(next);
 		}
 		if (next) {
-			popoverRef.current?.focus();
+			const autoFocusTarget =
+				popoverRef.current?.querySelector<HTMLElement>("[data-autofocus]");
+			(autoFocusTarget ?? popoverRef.current)?.focus();
 		}
 	};
 

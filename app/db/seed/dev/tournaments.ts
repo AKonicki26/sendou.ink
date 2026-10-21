@@ -1,5 +1,9 @@
 import { addDays, addHours, addWeeks, sub, subWeeks } from "date-fns";
-import type { TeamPickSettings, TournamentSettings } from "~/db/tables-json";
+import type {
+	CastAccount,
+	TeamPickSettings,
+	TournamentSettings,
+} from "~/db/tables-json";
 import * as Availability from "~/features/availability/core/Availability";
 import { MapPool } from "~/features/map-list-generator/core/map-pool";
 import { BANNED_MAPS } from "~/features/match-profile/banned-maps";
@@ -14,6 +18,7 @@ import {
 	databaseTimestampToDate,
 	dateToDatabaseTimestamp,
 } from "~/utils/dates";
+import { NZAP_YOUTUBE_ID } from "../constants";
 import { faker, unique } from "../core/faker";
 import * as showcaseNames from "../core/showcaseNames";
 import * as ImageFactory from "../factories/ImageFactory";
@@ -35,6 +40,15 @@ const SZ_ONLY_TEAM_PICK: TeamPickSettings = {
 	pool: "SENDOUQ",
 };
 const RANKED_MODES_TEAM_PICK = TeamPick.defaultSettings([...rankedModesShort]);
+/** Live on both platforms, see the streams seeded in misc.ts. */
+const PADDLING_POOL_CAST_ACCOUNTS: CastAccount[] = [
+	{ platform: "TWITCH", account: "paddling_cast", name: "paddling_cast" },
+	{
+		platform: "YOUTUBE",
+		account: "UCpaddlingPoolCasts00000",
+		name: "Paddling Pool Casts",
+	},
+];
 /** Uneven counts from a custom pool: every SZ stage, half of the legal TC stages. */
 const PADDLING_POOL_TEAM_PICK: TeamPickSettings = {
 	modes: [
@@ -117,7 +131,7 @@ const SINGLE_ELIMINATION: Progression = [
 		type: "single_elimination",
 		name: "Bracket",
 		requiresCheckIn: false,
-		settings: { thirdPlaceMatch: true },
+		settings: {},
 	},
 ];
 
@@ -164,6 +178,42 @@ const SWISS_TO_SINGLE_ELIMINATION: Progression = [
 	},
 ];
 
+/**
+ * Double elimination pools whose unbeaten teams make the top cut. The teams alive with one loss play a
+ * double elimination redemption in groups without grand finals, each group's unbeaten team making the top cut too.
+ */
+const DOUBLE_ELIMINATION_GROUPS_WITH_REDEMPTION_AND_TOP_CUT: Progression = [
+	{
+		type: "double_elimination",
+		name: "Main",
+		requiresCheckIn: false,
+		settings: {
+			groupCount: 8,
+			skippedRounds: ["LB_SEMIS", "LB_FINALS", "GRAND_FINALS", "BRACKET_RESET"],
+		},
+	},
+	{
+		type: "double_elimination",
+		name: "Redemption",
+		requiresCheckIn: false,
+		settings: {
+			groupCount: 8,
+			skippedRounds: ["GRAND_FINALS", "BRACKET_RESET"],
+		},
+		sources: [{ bracketIdx: 0, placements: [2, 3] }],
+	},
+	{
+		type: "double_elimination",
+		name: "Top Cut",
+		requiresCheckIn: false,
+		settings: {},
+		sources: [
+			{ bracketIdx: 0, placements: [1] },
+			{ bracketIdx: 1, placements: [1] },
+		],
+	},
+];
+
 export type SeededTournaments = {
 	/** The one with registration still open, which the notifications are about. */
 	regOpen: {
@@ -175,6 +225,8 @@ export type SeededTournaments = {
 	};
 	/** Teams N-ZAP played on in the tournaments that were played to the end. */
 	nzapTeamIds: number[];
+	/** Cast accounts of a tournament in progress, each to be seeded live. */
+	castAccounts: CastAccount[];
 	/** The league in progress, with the pieces other seeds hang their data on. */
 	luti: {
 		id: number;
@@ -222,6 +274,8 @@ export async function seedTournaments({
 		seriesLogoImgIds,
 	});
 
+	await seedSuperjump({ users, organizations, rosters });
+
 	const nzapTeamIds = await seedHistoricalTournaments({
 		users,
 		organizations,
@@ -239,7 +293,12 @@ export async function seedTournaments({
 		seriesLogoImgIds,
 	});
 
-	return { regOpen: inTheZone, nzapTeamIds, luti };
+	return {
+		regOpen: inTheZone,
+		nzapTeamIds,
+		castAccounts: PADDLING_POOL_CAST_ACCOUNTS,
+		luti,
+	};
 }
 
 type Ctx = {
@@ -321,17 +380,20 @@ async function seedInTheZone({
 
 /** #2 double elim + underground, team picked SZ ×6 + TC ×3 from a custom pool, ranked — started, nothing reported. N-ZAP is seeded past the byes so he has a match going. */
 async function seedPaddlingPool({ users, rosters }: Ctx) {
-	const tournament = await TournamentFactory.create({
-		name: nameFor("Paddling Pool"),
-		authorId: users.adminId,
-		avatarFileName: "paddling-pool.png",
-		startTimes: [dateToDatabaseTimestamp(hoursAgo(1))],
-		mapPickingStyle: "AUTO",
-		teamPick: PADDLING_POOL_TEAM_PICK,
-		mapPoolMaps: PADDLING_POOL_MAP_POOL,
-		bracketProgression: DOUBLE_ELIMINATION_WITH_UNDERGROUND,
-		isRanked: true,
-	});
+	const tournament = await TournamentFactory.create(
+		{
+			name: nameFor("Paddling Pool"),
+			authorId: users.adminId,
+			avatarFileName: "paddling-pool.png",
+			startTimes: [dateToDatabaseTimestamp(hoursAgo(1))],
+			mapPickingStyle: "AUTO",
+			teamPick: PADDLING_POOL_TEAM_PICK,
+			mapPoolMaps: PADDLING_POOL_MAP_POOL,
+			bracketProgression: DOUBLE_ELIMINATION_WITH_UNDERGROUND,
+			isRanked: true,
+		},
+		{ castAccounts: PADDLING_POOL_CAST_ACCOUNTS },
+	);
 
 	const teamRosters = rosters.take({
 		teamCount: 12,
@@ -507,7 +569,7 @@ async function seedLuti({
 	});
 	await TournamentStreamerFactory.create({
 		tournamentId: tournament.id,
-		twitchAccount: "luti_cast",
+		account: "luti_cast",
 	});
 
 	for (const [index] of LUTI_DIVISIONS.entries()) {
@@ -692,6 +754,37 @@ async function seedLuti({
 }
 
 /** Every division is a round robin whose top two go on to its playoffs. */
+/**
+ * #6 double elimination groups → double elimination redemption → top cut, TO maps — the groups played
+ * out, the redemption started with nothing reported and the top cut waiting for its two finalists.
+ * 22 teams split 8/7/7, so two of the groups open with a bye.
+ */
+async function seedSuperjump({ users, rosters }: Ctx) {
+	const tournament = await TournamentFactory.create({
+		name: nameFor("Superjump"),
+		authorId: users.adminId,
+		startTimes: [dateToDatabaseTimestamp(hoursAgo(3))],
+		mapPickingStyle: "TO",
+		mapPoolMaps: toSetMapPool(),
+		bracketProgression: DOUBLE_ELIMINATION_GROUPS_WITH_REDEMPTION_AND_TOP_CUT,
+	});
+
+	const teamRosters = rosters.take({
+		teamCount: 64,
+		teamSize: 4,
+		pinned: [{ teamIdx: 2, userId: users.nzapId }],
+	});
+
+	await registerTeams({
+		tournamentId: tournament.id,
+		rosters: teamRosters,
+		isCheckedIn: true,
+	});
+
+	await TournamentFactory.playOut(tournament.id, 0);
+	await TournamentFactory.startBracket(tournament.id, { bracketIdx: 1 });
+}
+
 function lutiProgression(): Progression {
 	return LUTI_DIVISIONS.flatMap((division, index) => [
 		{
@@ -877,9 +970,15 @@ async function seedSubs(tournamentId: number, users: SeededUsers) {
 }
 
 async function seedTournamentExtras(tournamentId: number, users: SeededUsers) {
-	for (const twitchAccount of ["sendou", "nzap_stream"]) {
-		await TournamentStreamerFactory.create({ tournamentId, twitchAccount });
+	for (const account of ["sendou", "nzap_stream"]) {
+		await TournamentStreamerFactory.create({ tournamentId, account });
 	}
+	await TournamentStreamerFactory.create({
+		tournamentId,
+		platform: "YOUTUBE",
+		account: NZAP_YOUTUBE_ID,
+		userId: users.nzapId,
+	});
 
 	// not N-ZAP: he registers with Alliance Rogue and a player can't both be on a team and look for one
 	const lfgUserIds = users.showcaseIds.slice(90, 96);

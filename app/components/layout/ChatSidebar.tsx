@@ -23,20 +23,19 @@ import {
 import type { ChatRoomListItem } from "~/features/chat/chat-types";
 import { Chat } from "~/features/chat/components/Chat";
 import * as LogLayout from "~/features/chat/core/LogLayout";
+import { VoiceBar, VoiceCallStrip } from "~/features/voice/components/VoiceBar";
+import { useVoiceSnapshot } from "~/features/voice/voice-hooks";
 import { useDateTimeFormat } from "~/hooks/intl/useDateTimeFormat";
-import {
-	databaseTimestampToDate,
-	dateToDatabaseTimestamp,
-} from "~/utils/dates";
+import { databaseTimestampNow, databaseTimestampToDate } from "~/utils/dates";
 import { navIconUrl } from "~/utils/urls";
 import {
-	NavIconContainer,
-	NavListButton,
-	NavListImage,
-	NavListSubtitle,
-	NavListTexts,
-	NavListTitle,
-} from "../SideNav";
+	ListItemButton,
+	ListItemImage,
+	ListItemSubtitle,
+	ListItemTexts,
+	ListItemTitle,
+} from "../ListItem";
+import { NavIconContainer } from "../SideNav";
 import styles from "./ChatSidebar.module.css";
 
 export function ChatSidebar({ onClose }: { onClose?: () => void }) {
@@ -135,7 +134,7 @@ function roomShortLabel(room: ChatRoomListItem, t: TFunction<["common"]>) {
 }
 
 function roomIsInactive(room: ChatRoomListItem) {
-	return room.inactive || room.expiresAt <= dateToDatabaseTimestamp(new Date());
+	return room.inactive || room.expiresAt <= databaseTimestampNow();
 }
 
 function SidebarHeader({ onClose }: { onClose?: () => void }) {
@@ -226,6 +225,7 @@ function RoomList({
 	return (
 		<div className={styles.sidebar}>
 			<SidebarHeader onClose={onClose} />
+			<ActiveVoiceCallStrip />
 			<div className={styles.roomList}>
 				{!hasAnyRoom ? (
 					<div className={styles.emptyState}>
@@ -311,15 +311,15 @@ function RoomListItem({
 	const subtitle = subtitleOverride ?? roomSubtitle;
 
 	return (
-		<NavListButton
+		<ListItemButton
 			className={clsx(styles.roomItem, inactive ? "opaque" : null)}
 			onClick={onClick}
 		>
-			<NavListImage src={imageUrl} />
-			<NavListTexts>
-				<NavListTitle className={styles.roomName}>{title}</NavListTitle>
-				<NavListSubtitle>{subtitle}</NavListSubtitle>
-			</NavListTexts>
+			<ListItemImage src={imageUrl} />
+			<ListItemTexts>
+				<ListItemTitle className={styles.roomName}>{title}</ListItemTitle>
+				<ListItemSubtitle>{subtitle}</ListItemSubtitle>
+			</ListItemTexts>
 			{room.unreadCount > 0 ? (
 				<span className={styles.unreadBadge}>{room.unreadCount}</span>
 			) : room.latestMessageAt !== null ? (
@@ -329,7 +329,7 @@ function RoomListItem({
 					)}
 				</span>
 			) : null}
-		</NavListButton>
+		</ListItemButton>
 	);
 }
 
@@ -348,16 +348,16 @@ function CombinedRoomListItem({
 	const unread = rooms.reduce((sum, room) => sum + room.unreadCount, 0);
 
 	return (
-		<NavListButton className={styles.roomItem} onClick={onClick}>
-			<NavListImage src={imageUrl} />
-			<NavListTexts>
-				<NavListTitle className={styles.roomName}>{title}</NavListTitle>
-				<NavListSubtitle>
+		<ListItemButton className={styles.roomItem} onClick={onClick}>
+			<ListItemImage src={imageUrl} />
+			<ListItemTexts>
+				<ListItemTitle className={styles.roomName}>{title}</ListItemTitle>
+				<ListItemSubtitle>
 					{rooms.map((room) => roomShortLabel(room, t)).join(" · ")}
-				</NavListSubtitle>
-			</NavListTexts>
+				</ListItemSubtitle>
+			</ListItemTexts>
 			{unread > 0 ? <span className={styles.unreadBadge}>{unread}</span> : null}
-		</NavListButton>
+		</ListItemButton>
 	);
 }
 
@@ -398,13 +398,15 @@ function SingleChatView({
 
 	const headerContent = (
 		<>
-			{display ? <NavListImage src={display.imageUrl} /> : null}
+			{display ? <ListItemImage src={display.imageUrl} /> : null}
 			<div className={styles.chatHeaderInfo}>
-				<span className={styles.chatHeaderTitle}>
+				<span className={clsx(styles.chatHeaderTitle, "truncate")}>
 					{display?.title ?? t("common:chat.sidebar.title")}
 				</span>
 				{subtitle ? (
-					<span className={styles.chatHeaderSubtitle}>{subtitle}</span>
+					<span className={clsx(styles.chatHeaderSubtitle, "truncate")}>
+						{subtitle}
+					</span>
 				) : null}
 			</div>
 		</>
@@ -442,6 +444,8 @@ function SingleChatView({
 					</button>
 				) : null}
 			</div>
+			<ActiveVoiceCallStrip />
+			{room ? <VoiceBar key={room.id} room={room} /> : null}
 			<div className={styles.chatContainer}>
 				{/* keyed so switching rooms starts the scroller and its unseen state over */}
 				{room ? <RoomChat key={room.id} room={room} /> : null}
@@ -494,15 +498,25 @@ function CombinedChatView({
 		};
 	}, [backgroundRoomIdsKey, setHiddenRoomIds]);
 
+	const { call } = useVoiceSnapshot();
+	const backgroundCallRoom =
+		call && call.roomId !== selectedRoomId
+			? rooms.find((room) => room.id === call.roomId)
+			: undefined;
+
 	const primary = rooms[0];
 	const display = roomDisplay(primary);
 	const headerContent = (
 		<>
-			<NavListImage src={display.imageUrl} />
+			<ListItemImage src={display.imageUrl} />
 			<div className={styles.chatHeaderInfo}>
-				<span className={styles.chatHeaderTitle}>{display.title}</span>
+				<span className={clsx(styles.chatHeaderTitle, "truncate")}>
+					{display.title}
+				</span>
 				{display.subtitle ? (
-					<span className={styles.chatHeaderSubtitle}>{display.subtitle}</span>
+					<span className={clsx(styles.chatHeaderSubtitle, "truncate")}>
+						{display.subtitle}
+					</span>
 				) : null}
 			</div>
 		</>
@@ -535,6 +549,7 @@ function CombinedChatView({
 					</button>
 				) : null}
 			</div>
+			<ActiveVoiceCallStrip />
 			<div ref={splitViewRef} className={styles.splitView}>
 				<SendouTabs
 					selectedKey={roomTabId(selectedRoomId)}
@@ -563,6 +578,9 @@ function CombinedChatView({
 								</SendouTab>
 							))}
 						</SendouTabList>
+						{backgroundCallRoom ? (
+							<VoiceBar key={backgroundCallRoom.id} room={backgroundCallRoom} />
+						) : null}
 					</div>
 					{rooms.map((room) => (
 						<SplitPanel
@@ -604,6 +622,7 @@ function SplitPanel({
 			onFocus={onFocus}
 		>
 			<div className={styles.splitPanelHeader}>{roomShortLabel(room, t)}</div>
+			<VoiceBar room={room} />
 			<div className={styles.chatContainer}>
 				<RoomChat room={room} />
 			</div>
@@ -615,7 +634,7 @@ function RoomChat({ room }: { room: ChatRoomListItem }) {
 	const chatContext = useChatContext()!;
 	const user = useUser();
 
-	const expired = room.expiresAt <= dateToDatabaseTimestamp(new Date());
+	const expired = room.expiresAt <= databaseTimestampNow();
 	const messages = chatContext.messagesForRoom(room.id);
 
 	return (
@@ -632,6 +651,27 @@ function RoomChat({ room }: { room: ChatRoomListItem }) {
 			mentionableUsers={room.participants}
 			disabled={expired}
 			readOnly={!expired && !room.canPost}
+		/>
+	);
+}
+
+function ActiveVoiceCallStrip() {
+	const { call } = useVoiceSnapshot();
+	const chatContext = useChatContext()!;
+	const roomDisplay = useRoomDisplay();
+
+	if (!call || chatContext.activeRoomIds.includes(call.roomId)) return null;
+
+	const room = chatContext.roomForId(call.roomId);
+	if (!room) return null;
+
+	return (
+		<VoiceCallStrip
+			title={roomDisplay(room).title}
+			onOpen={() => {
+				chatContext.ensureMessagesLoaded(room.id);
+				chatContext.setActiveRoomIds([room.id]);
+			}}
 		/>
 	);
 }

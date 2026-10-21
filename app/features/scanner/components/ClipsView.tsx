@@ -1,3 +1,4 @@
+import clsx from "clsx";
 /**
  * Clip history: the best clips across sessions, sorted by score, playable
  * in place, each downloadable and deletable. The lowest-scoring one is
@@ -8,6 +9,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { SendouButton } from "~/components/elements/Button";
 import { FormWithConfirm } from "~/components/FormWithConfirm";
+import { downloadBlob } from "~/utils/download";
 import { SCANNER_PAGE } from "~/utils/urls";
 import { formatPosition } from "../core/format";
 import { modeLabel, stageLabel } from "../core/labels";
@@ -22,7 +24,6 @@ import {
 import styles from "./ClipsView.module.css";
 import { ClipVideo } from "./ClipVideo";
 import { refreshClips, useClips } from "./clips-feed";
-import { downloadBlob } from "./download";
 import { useEventDateTimeFormatter } from "./format";
 import { SessionHeader } from "./SessionHeader";
 
@@ -129,7 +130,7 @@ function ClipCard({ clip }: { clip: ScannerClip }) {
 				<div className={styles.cardMeta}>
 					<Link
 						to={sourceHref}
-						className={styles.sourceLink}
+						className={clsx(styles.sourceLink, "truncate")}
 						defaultShouldRevalidate={false}
 					>
 						{clip.source.kind === "vod"

@@ -41,6 +41,7 @@
 
 - forms are built with the `SendouForm` schema-based system: a valibot schema using field builders from `~/form/fields` generates both the UI and server-side validation, see [forms.md](./docs/dev/forms.md)
 - form label/help translations go in `locales/en/forms.json`
+- actions are defined with `defineAction` (`~/form/define-action.server`), which parses route params (404 on failure) and the body (`fieldErrors` for SendouForm, error toast otherwise) before the handler runs, see [forms.md](./docs/dev/forms.md); enforced by the `no-raw-actions` Biome plugin
 - fixed-field mutations (an `_action` plus hidden inputs) use `<ActionButton>` which type checks the action and fields against the route's action schema; real multi-input forms instead pass `schema` alongside `_action` to `SubmitButton`; enforced by the `no-raw-action-forms` Biome plugin
 
 ## Remix/React Router
@@ -52,6 +53,11 @@
 - all URL search param handling goes through `app/modules/search-params/`, see [search-params.md](./docs/dev/search-params.md) for the conventions
 - never use raw `useSearchParams` or `searchParams.get()`; declare params once per feature in a `<feature>-search-params.ts` definition (every param has a default, decode never fails). Enforced by the `no-raw-search-params` Biome plugin
 - every definition gets a round-trip test via `assertRoundTrips`
+
+## Web storage
+
+- all `localStorage` / `sessionStorage` access goes through `app/modules/persisted-state/`: declare the value once with `PersistedState.define` (or `defineMap` for a keyed family), typically in a `<feature>-persisted.ts` file, and use `usePersistedState` / `PersistedState.read` / `write`. Enforced by the `no-raw-web-storage` Biome plugin
+- every definition gets a round-trip test via `assertRoundTrips` from `persisted-state-test-utils.ts`
 
 ## Styling
 
@@ -73,9 +79,11 @@
 - down migrations are not needed, only up migrations
 - if we are working on a branch by default we should add to the migration this branch added instead of creating a brand new one
 - `/app/db/tables.ts` contains all tables and columns available, see [database-schemas.md](./docs/dev/database-schemas.md) for how columns should be typed (booleans, timestamps, JSON, enums, SQLite migration quirks)
+- don't wrap queries in `Promise.all`: `node:sqlite` is synchronous, so they can't run in parallel and it only adds noise; await them one after another
 - `db.sqlite3` is development database
 - `db-test.sqlite3` is the unit test database (blank sans migrations; gitignored and created/migrated automatically when unit tests run)
-- `db-prod.sqlite3` is a copy of the production environment db which can be freely experimented with
+- `db-sandbox.sqlite3` is a local, disposable copy of production data. Read, write, migrate, run servers against it or delete it freely — it is not connected to production in any way. `pnpm run sandbox:reset` restores it
+- `db-snapshot.sqlite3` is the pristine source `db-sandbox.sqlite3` is reset from, never modify it
 
 ## Unit testing
 
@@ -93,7 +101,7 @@
 - by default everything should be translated via i18next
 - some a11y labels or text that should not normally be encountered by user (example given, error message by server) can be english
 - before adding a new translation, check that one doesn't already exist you can reuse (particularly in the common.json)
-- add only English translation and use `pnpm run i18n:sync` to initialize other jsons with empty string ready for translators
+- add only English translation, other languages fall back to English until translated (never add empty strings); run `pnpm run i18n:sync` after removing or renaming keys
 - when using namespace e.g. `const { t } = useTranslation("settings"]);` it needs to be defined in the `handle` for that route e.g. `export const handle: SendouRouteHandle = { i18n: ["settings"], ... }`. Certain namespaces are always included and you don't have to worry about those: "common", "forms", "game-misc", "weapons", "front", "friends"
 - if changing translation key names make sure to port over any already translated values for non-english languages if the english language is unchanged
 

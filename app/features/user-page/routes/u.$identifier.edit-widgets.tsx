@@ -14,8 +14,9 @@ import {
 	useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import clsx from "clsx";
 import { Search as SearchIcon, Trash } from "lucide-react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Link, useFetcher, useLoaderData } from "react-router";
@@ -39,6 +40,7 @@ import type { WidgetId } from "~/features/user-page/core/widgets/types";
 import { getWidgetFormSchema } from "~/features/user-page/core/widgets/widget-form-schemas";
 import { USER } from "~/features/user-page/user-page-constants";
 import { useUnsavedChangesChecker } from "~/form/UnsavedChangesGuard";
+import { RENDERS_FIELD_ERRORS_KEY } from "~/form/utils";
 import { useHydrated } from "~/hooks/useHydrated";
 import { useHasRole } from "~/modules/permissions/hooks";
 import { navIconUrl, SUPPORT_PAGE } from "~/utils/urls";
@@ -70,13 +72,11 @@ export default function EditWidgetsPage() {
 	const [expandedWidgetId, setExpandedWidgetId] = useState<string | null>(null);
 	const [emptySaveAttempted, setEmptySaveAttempted] = useState(false);
 
-	const hasUnsavedChangesRef = useRef<
-		Parameters<typeof useUnsavedChangesChecker>[0]["current"]
-	>(() => false);
-	hasUnsavedChangesRef.current = () =>
-		fetcher.state === "idle" &&
-		!R.isDeepEqual(selectedWidgets, data.currentWidgets);
-	useUnsavedChangesChecker(hasUnsavedChangesRef);
+	useUnsavedChangesChecker(
+		() =>
+			fetcher.state === "idle" &&
+			!R.isDeepEqual(selectedWidgets, data.currentWidgets),
+	);
 
 	const mainWidgets = selectedWidgets.filter((w) => {
 		const def = findWidgetById(w.id);
@@ -167,7 +167,10 @@ export default function EditWidgetsPage() {
 		}
 
 		fetcher.submit(
-			{ widgets: selectedWidgets } as unknown as Record<string, string>,
+			{
+				widgets: selectedWidgets,
+				[RENDERS_FIELD_ERRORS_KEY]: true,
+			} as unknown as Record<string, string>,
 			{ method: "post", encType: "application/json" },
 		);
 	};
@@ -215,7 +218,7 @@ export default function EditWidgetsPage() {
 
 			<div className={styles.content}>
 				<div className={styles.grid}>
-					<section className={styles.selected}>
+					<section className={clsx(styles.selected, "scrollbar")}>
 						<DndContext
 							sensors={sensors}
 							onDragStart={handleDragStart}
@@ -296,6 +299,7 @@ function AvailableWidgetsList({
 	return (
 		<div>
 			<Input
+				type="search"
 				className={styles.searchInput}
 				icon={<SearchIcon className={styles.searchIcon} />}
 				value={searchValue}

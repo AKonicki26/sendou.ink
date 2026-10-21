@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as Attention from "./Attention";
 
 const IDLE_AFTER_MS = 1_000;
+const LAST_ACTIVE_TAB = "last-active-tab";
 
 function fakeEnvironment(storage = new Map<string, string>()) {
 	const state = {
@@ -18,10 +19,14 @@ function fakeEnvironment(storage = new Map<string, string>()) {
 		environment: {
 			document,
 			window,
-			storage: {
-				getItem: (key: string) => storage.get(key) ?? null,
-				setItem: (key: string, value: string) => {
-					storage.set(key, value);
+			lastActiveTab: {
+				read: () => storage.get(LAST_ACTIVE_TAB) ?? null,
+				write: (tabId: string | null) => {
+					if (tabId === null) {
+						storage.delete(LAST_ACTIVE_TAB);
+					} else {
+						storage.set(LAST_ACTIVE_TAB, tabId);
+					}
 				},
 			},
 			now: () => Date.now(),
@@ -39,6 +44,7 @@ function fakeEnvironment(storage = new Map<string, string>()) {
 			window.dispatchEvent(new Event("focus"));
 		},
 		useKeyboard: () => window.dispatchEvent(new Event("keydown")),
+		close: () => window.dispatchEvent(new Event("pagehide")),
 	};
 }
 
@@ -124,13 +130,39 @@ describe("Attention.createTracker", () => {
 		expect(first.isLastActiveTab()).toBe(true);
 	});
 
-	test("every tab counts as the last active one without storage", () => {
-		const env = fakeEnvironment();
-		const tracker = Attention.createTracker(() => ({
-			...env.environment,
-			storage: null,
-		}));
+	test("every tab counts as the last active one again once it is closed", () => {
+		const storage = new Map<string, string>();
+		const firstEnv = fakeEnvironment(storage);
+		const secondEnv = fakeEnvironment(storage);
+		const first = trackerFor(firstEnv);
+		const second = trackerFor(secondEnv);
+		secondEnv.blur();
+		second.isAttending();
+		first.isAttending();
+		expect(second.isLastActiveTab()).toBe(false);
 
-		expect(tracker.isLastActiveTab()).toBe(true);
+		firstEnv.close();
+
+		expect(second.isLastActiveTab()).toBe(true);
+	});
+
+	test("closing a background tab keeps the last active one", () => {
+		const storage = new Map<string, string>();
+		const firstEnv = fakeEnvironment(storage);
+		const secondEnv = fakeEnvironment(storage);
+		const thirdEnv = fakeEnvironment(storage);
+		const first = trackerFor(firstEnv);
+		const second = trackerFor(secondEnv);
+		const third = trackerFor(thirdEnv);
+		secondEnv.blur();
+		thirdEnv.blur();
+		second.isAttending();
+		third.isAttending();
+		first.isAttending();
+
+		secondEnv.close();
+
+		expect(first.isLastActiveTab()).toBe(true);
+		expect(third.isLastActiveTab()).toBe(false);
 	});
 });

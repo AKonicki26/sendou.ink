@@ -313,7 +313,9 @@ function Leaderboard({
 							size="xs"
 						/>
 						<div className="stack items-start">
-							<div className={styles.leaderboardName}>{entry.name}</div>
+							<div className={clsx(styles.leaderboardName, "truncate")}>
+								{entry.name}
+							</div>
 							<div className="text-xs font-semi-bold text-lighter">
 								{entry.power.toFixed(2)}
 							</div>
@@ -348,7 +350,7 @@ function DiscoverFeatures() {
 				<WeaponPoolBanner
 					weaponIds={data.weaponPool.map((weapon) => weapon.weaponSplId)}
 					weaponHref={(weaponId) =>
-						globalSearchSearchParams.href("", {
+						globalSearchSearchParams.href("/", {
 							search: "open",
 							type: "weapons",
 							weapon: weaponId,

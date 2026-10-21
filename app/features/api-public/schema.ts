@@ -18,6 +18,8 @@ export interface GetUserResponse {
 	country: string | null;
 	socials: {
 		twitch: string | null;
+		/** YouTube channel ID @example "UCLN8s9Ogn71QcCYIPtb9mtw" */
+		youtube: string | null;
 		/** @deprecated */
 		twitter: null;
 		bsky: string | null;
@@ -210,17 +212,22 @@ export interface GetCastedTournamentMatchesResponse {
 }
 
 type TournamentCastChannel = {
-	type: "TWITCH";
-	/** @example "iplsplatoon" */
+	type: "TWITCH" | "YOUTUBE";
+	/** Twitch login or YouTube channel ID. @example "iplsplatoon" */
 	channelId: string;
+	/** @example "https://twitch.tv/iplsplatoon" */
+	url: string;
 };
 
 /** GET /api/tournament/{tournamentId}/streams */
 
 export type GetTournamentStreamsResponse = Array<
 	{
-		platform: "TWITCH";
+		platform: "TWITCH" | "YOUTUBE";
+		/** Twitch login or YouTube channel ID. */
 		channelId: string;
+		/** Where the stream can be watched. @example "https://twitch.tv/iplsplatoon" */
+		url: string;
 		viewerCount: number;
 	} & ({ type: "PLAYER"; userId: number } | { type: "CAST" })
 >;
@@ -234,6 +241,7 @@ export interface GetTournamentMatchResponse {
 	bracketName: string | null;
 	/** Name of the round this match belongs to. @example "Grand Finals" */
 	roundName: string | null;
+	/** Maps already played (with their results) followed by the upcoming ones. Once the set is over, only the played maps. `null` until both teams are known. */
 	mapList: Array<MapListMap> | null;
 	/** @example "https://sendou.ink/to/9/matches/695" */
 	url: string;
@@ -401,6 +409,7 @@ export type MapListMap = {
 		| "TO"
 		| "COUNTERPICK"
 		| "ROLL";
+	/** `null` if the map has not been played yet. */
 	winnerTeamId: number | null;
 	participatedUserIds: Array<number> | null;
 	/** (round robin only) whether the map ended in a knockout. `null` if not tracked. */

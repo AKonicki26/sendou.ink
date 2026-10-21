@@ -237,7 +237,7 @@ function InfoTabs() {
 
 	return (
 		<div>
-			<SendouTabs>
+			<SendouTabs keepPanelsMounted>
 				<SendouTabList>
 					<SendouTab id="socials" isDisabled={!hasSocials} icon={<LinkIcon />}>
 						{t("org:edit.form.socialLinks.title")}
@@ -380,6 +380,7 @@ function AllTournamentsView() {
 	return (
 		<div className={styles.eventsContainer}>
 			<EventCalendar
+				organizationSlug={data.organization.slug}
 				month={data.month}
 				year={data.year}
 				events={data.events}
@@ -407,7 +408,7 @@ function SeriesView({
 		<div className="stack md">
 			<SeriesHeader series={series} />
 			<div>
-				<SendouTabs>
+				<SendouTabs keepPanelsMounted>
 					<SendouTabList>
 						<SendouTab id="events" number={series.eventsCount}>
 							{t("org:events.tabs.events")}
@@ -505,11 +506,16 @@ function SeriesButton({
 	children: React.ReactNode;
 	seriesId?: number;
 }) {
+	const data = useLoaderData<typeof loader>();
+
 	return (
 		<LinkButton
 			variant="minimal"
 			size="small"
-			to={`?series=${seriesId ?? "all"}`}
+			to={tournamentOrganizationPage({
+				organizationSlug: data.organization.slug,
+				seriesId,
+			})}
 		>
 			{children}
 		</LinkButton>

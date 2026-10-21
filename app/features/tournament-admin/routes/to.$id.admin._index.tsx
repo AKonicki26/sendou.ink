@@ -101,6 +101,7 @@ export default function TournamentAdminTeamsPage() {
 					onChange={(e) => setSearch(e.target.value)}
 					aria-label="Search teams"
 					placeholder="Search teams"
+					type="search"
 					icon={<Search aria-hidden />}
 				/>
 			</div>
@@ -221,7 +222,7 @@ function TeamRow({
 							tournamentId: tournament.ctx.id,
 							tournamentTeamId: team.id,
 						})}
-						className={styles.teamName}
+						className={clsx(styles.teamName, "truncate")}
 						data-testid="team-name"
 					>
 						{team.name}
@@ -319,7 +320,7 @@ function TeamRowMenu({
 }) {
 	const tournament = useTournament();
 	const [confirming, setConfirming] = React.useState<
-		"DELETE_TEAM" | "DROP_TEAM_OUT" | null
+		"CHECK_OUT" | "DELETE_TEAM" | "DROP_TEAM_OUT" | null
 	>(null);
 
 	const { submit } = useActionSubmit(adminTeamsActionSchema, {
@@ -328,6 +329,8 @@ function TeamRowMenu({
 
 	const checkInOpen = tournament.regularCheckInStartInThePast;
 	const checkedIn = isTournamentCheckedIn(team);
+	const startingBracketStarted =
+		!tournament.bracketsMeta[tournament.startingBracketIdxOfTeam(team)].preview;
 	const bracketsRequiringCheckIn = checkInBracketsForTeam(tournament, team);
 	const eventLabelSuffix = tournament.bracketsMeta.some(isCheckInBracket)
 		? " (event)"
@@ -351,26 +354,27 @@ function TeamRowMenu({
 					/>
 				}
 			>
-				{checkInOpen && !tournament.hasStarted ? (
-					checkedIn ? (
-						<SendouMenuItem
-							icon={<LogOut />}
-							onAction={() =>
-								submit("CHECK_OUT", { teamId: team.id, bracketIdx: 0 })
-							}
-						>
-							{`Check out${eventLabelSuffix}`}
-						</SendouMenuItem>
-					) : (
-						<SendouMenuItem
-							icon={<LogIn />}
-							onAction={() =>
-								submit("CHECK_IN", { teamId: team.id, bracketIdx: 0 })
-							}
-						>
-							{`Check in${eventLabelSuffix}`}
-						</SendouMenuItem>
-					)
+				{checkInOpen && checkedIn && !startingBracketStarted ? (
+					<SendouMenuItem
+						icon={<LogOut />}
+						onAction={() =>
+							tournament.hasStarted
+								? setConfirming("CHECK_OUT")
+								: submit("CHECK_OUT", { teamId: team.id, bracketIdx: 0 })
+						}
+					>
+						{`Check out${eventLabelSuffix}`}
+					</SendouMenuItem>
+				) : null}
+				{checkInOpen && !checkedIn && !tournament.hasStarted ? (
+					<SendouMenuItem
+						icon={<LogIn />}
+						onAction={() =>
+							submit("CHECK_IN", { teamId: team.id, bracketIdx: 0 })
+						}
+					>
+						{`Check in${eventLabelSuffix}`}
+					</SendouMenuItem>
 				) : null}
 				{team.checkIns.length > 0
 					? bracketsRequiringCheckIn.map((bracket) => {
@@ -421,7 +425,7 @@ function TeamRowMenu({
 						>
 							Undo drop out
 						</SendouMenuItem>
-					) : (
+					) : startingBracketStarted ? (
 						<SendouMenuItem
 							icon={<LogOut />}
 							isDestructive
@@ -429,7 +433,7 @@ function TeamRowMenu({
 						>
 							Drop out
 						</SendouMenuItem>
-					)
+					) : null
 				) : (
 					<SendouMenuItem
 						icon={<Trash2 />}
@@ -440,6 +444,17 @@ function TeamRowMenu({
 					</SendouMenuItem>
 				)}
 			</SendouMenu>
+			<FormWithConfirm
+				isOpen={confirming === "CHECK_OUT"}
+				onOpenChange={(isOpen) => !isOpen && setConfirming(null)}
+				fields={[
+					["_action", "CHECK_OUT"],
+					["teamId", team.id],
+					["bracketIdx", 0],
+				]}
+				dialogHeading={`Check out "${team.name}"? The tournament has started so they can't be checked back in.`}
+				submitButtonText="Check out"
+			/>
 			<FormWithConfirm
 				isOpen={confirming === "DELETE_TEAM"}
 				onOpenChange={(isOpen) => !isOpen && setConfirming(null)}
@@ -490,7 +505,7 @@ function isCheckInBracket(bracket: BracketMeta) {
 /** Is the team going to play (or pending check-in) in this bracket? */
 function isTeamInBracket(bracket: BracketMeta, teamId: number) {
 	return Boolean(
-		bracket.seeding?.includes(teamId) ||
+		bracket.previewSeeding?.includes(teamId) ||
 			bracket.teamsPendingCheckIn?.includes(teamId),
 	);
 }

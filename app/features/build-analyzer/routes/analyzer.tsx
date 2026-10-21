@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { FlaskConical, SlidersHorizontal } from "lucide-react";
+import { ChartSpline, SlidersHorizontal } from "lucide-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import type { MetaFunction, ShouldRevalidateFunction } from "react-router";
@@ -403,10 +403,12 @@ function BuildAnalyzerPage({ mainWeaponId }: { mainWeaponId: MainWeaponId }) {
 														return;
 													}
 
-													handleChange({
-														[focused === 1 || firstBuildIsEmpty
+													const buildKey =
+														focused === 1 || firstBuildIsEmpty
 															? "newBuild"
-															: "newBuild2"]: newBuild,
+															: "newBuild2";
+													handleChange({
+														[buildKey]: newBuild,
 														newFocused: firstBuildIsEmpty ? 1 : undefined,
 													});
 												}}
@@ -638,11 +640,18 @@ function BuildAnalyzerPage({ mainWeaponId }: { mainWeaponId: MainWeaponId }) {
 							<StatCard
 								context={context}
 								stat={statKeyToTuple("specialDamageDistance")}
-								title={t("analyzer:stat.special.damageDistance", {
-									weapon: t(
-										`weapons:SPECIAL_${analyzed.weapon.specialWeaponSplId}`,
-									),
-								})}
+								title={t(
+									specialHasLethalDamageDistance(
+										analyzed.stats.specialWeaponDamages,
+									)
+										? "analyzer:stat.special.nonLethalDamageDistance"
+										: "analyzer:stat.special.damageDistance",
+									{
+										weapon: t(
+											`weapons:SPECIAL_${analyzed.weapon.specialWeaponSplId}`,
+										),
+									},
+								)}
 							/>
 						) : null}
 						{analyzed.stats.specialPaintRadius ? (
@@ -883,6 +892,12 @@ function BuildAnalyzerPage({ mainWeaponId }: { mainWeaponId: MainWeaponId }) {
 								),
 							})}
 							containerClassName={styles.tableContainer}
+							isHighlighted={
+								analyzed.stats.specialDamageDistance
+									? analyzed.stats.specialDamageDistance.value !==
+										analyzed.stats.specialDamageDistance.baseValue
+									: false
+							}
 						>
 							<DamageTable values={analyzed.stats.specialWeaponDamages} />
 						</StatCategory>
@@ -1142,6 +1157,7 @@ interface StatChartProps {
 	simple?: boolean;
 	/** Marks where the current build(s) sit on the curve: `x` ability points, `y` stat value. */
 	highlight?: Array<{ x: number; y: number }>;
+	triggerClassName?: string;
 }
 
 function StatChartPopover(props: StatChartProps) {
@@ -1153,7 +1169,8 @@ function StatChartPopover(props: StatChartProps) {
 					shape="circle"
 					variant="minimal"
 					size={props.simple ? "miniscule" : "small"}
-					icon={<FlaskConical />}
+					icon={<ChartSpline />}
+					className={props.triggerClassName}
 				/>
 			}
 		>
@@ -1552,6 +1569,7 @@ function StatCategory({
 	textBelow,
 	summaryRightContent,
 	testId,
+	isHighlighted = false,
 }: {
 	title: string;
 	children: React.ReactNode;
@@ -1559,10 +1577,16 @@ function StatCategory({
 	textBelow?: string;
 	summaryRightContent?: React.ReactNode;
 	testId?: string;
+	isHighlighted?: boolean;
 }) {
 	return (
 		<details className={styles.details}>
-			<summary className={styles.summary} data-testid={testId}>
+			<summary
+				className={clsx(styles.summary, {
+					[styles.summaryHighlighted]: isHighlighted,
+				})}
+				data-testid={testId}
+			>
 				{title}
 				{summaryRightContent}
 			</summary>
@@ -1626,10 +1650,7 @@ function StatCard({
 		);
 	};
 
-	const memoKey = isStaticValue ? stat : stat[2];
-	const modifiedBy = React.useMemo(() => {
-		return isStaticValue ? [] : [stat[0].modifiedBy].flat();
-	}, [memoKey]);
+	const modifiedBy = isStaticValue ? [] : [stat[0].modifiedBy].flat();
 
 	const stackableAbility = modifiedBy.find(isStackableAbility);
 	const highlight = (() => {
@@ -1725,6 +1746,8 @@ function StatCard({
 							valueSuffix={suffix}
 							mainWeaponId={mainWeaponId}
 							highlight={highlight}
+							triggerClassName={styles.statCardAction}
+							simple
 						/>
 					</>
 				)}
@@ -1826,7 +1849,7 @@ function DamageTable({
 			</thead>
 			<tbody>
 				{values.map((val, i) => {
-					if (val.type.includes("SECONDARY")) return null;
+					if (val.type.startsWith("DIRECT_SECONDARY")) return null;
 
 					const damage = (
 						damageValue: AnalyzedBuild["stats"]["damages"][number],
@@ -1987,5 +2010,16 @@ function ConsumptionTable({
 				</div>
 			) : null}
 		</>
+	);
+}
+
+function specialHasLethalDamageDistance(
+	damages: AnalyzedBuild["stats"]["specialWeaponDamages"],
+) {
+	return damages.some(
+		(damage) =>
+			damage.value >= 100 &&
+			typeof damage.distance === "number" &&
+			damage.distance > 0,
 	);
 }

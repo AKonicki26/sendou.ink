@@ -11,6 +11,7 @@ import {
 	type TournamentTierNumber,
 	WORST_TIER_NUMBER,
 } from "~/features/tournament/core/tiering";
+import * as TournamentTeamRepository from "~/features/tournament/TournamentTeamRepository.server";
 import type {
 	BuildSort,
 	ResultSource,
@@ -1133,6 +1134,11 @@ export async function findFriendCodesByUserId(userId: number) {
 
 let cachedFriendCodes: Set<string> | null = null;
 
+/** Drops the cached friend codes, for when the table was written to behind this module's back. */
+export function clearFriendCodesCache() {
+	cachedFriendCodes = null;
+}
+
 export async function findAllCurrentFriendCodes() {
 	if (cachedFriendCodes) {
 		return cachedFriendCodes;
@@ -1298,7 +1304,7 @@ export function updateOwnProfile(args: UpdateProfileArgs) {
 				.execute();
 		}
 
-		return trx
+		const user = await trx
 			.updateTable("User")
 			.set({
 				country: args.country,
@@ -1321,6 +1327,15 @@ export function updateOwnProfile(args: UpdateProfileArgs) {
 			.where("id", "=", userId)
 			.returning(["User.id", "User.customUrl", "User.discordId"])
 			.executeTakeFirstOrThrow();
+
+		const inGameNameUpdatedTournamentIds = args.inGameName
+			? await TournamentTeamRepository.updateOwnMemberInGameNameForNonStarted(
+					args.inGameName,
+					trx,
+				)
+			: [];
+
+		return { ...user, inGameNameUpdatedTournamentIds };
 	});
 }
 
@@ -1447,7 +1462,7 @@ export function updatePatronData(users: UpdatePatronDataArgs) {
 			})
 			.where((eb) =>
 				eb.or([
-					eb("patronExpiresAt", "<", dateToDatabaseTimestamp(new Date())),
+					eb("patronExpiresAt", "<", databaseTimestampNow()),
 					eb("patronExpiresAt", "is", null),
 				]),
 			)
@@ -1467,13 +1482,14 @@ export function updatePatronData(users: UpdatePatronDataArgs) {
 	});
 }
 
+/** Syncs Discord profile data by Discord id, a `null` name keeps the stored one. */
 export function updateMany(
-	argsArr: Array<
-		Pick<
-			Tables["User"],
-			"discordAvatar" | "discordName" | "discordUniqueName" | "discordId"
-		>
-	>,
+	argsArr: Array<{
+		discordId: string;
+		discordAvatar: string | null;
+		discordName: string | null;
+		discordUniqueName: string | null;
+	}>,
 ) {
 	return db.transaction().execute(async (trx) => {
 		for (const updateArgs of argsArr) {
@@ -1572,12 +1588,28 @@ export async function findSocialLinksByUserId(userId: number) {
 	return links;
 }
 
-export function findIdsByTwitchUsernames(twitchUsernames: string[]) {
-	if (twitchUsernames.length === 0) return [];
+/** Users whose connected Twitch login or YouTube channel id is among the given ones. */
+export function findIdsByStreamAccounts({
+	twitchNames,
+	youtubeIds,
+}: {
+	twitchNames: string[];
+	youtubeIds: string[];
+}) {
+	if (twitchNames.length === 0 && youtubeIds.length === 0) return [];
 
 	return db
 		.selectFrom("User")
-		.select(["User.id", "User.twitch"])
-		.where("User.twitch", "in", twitchUsernames)
+		.select(["User.id", "User.twitch", "User.youtubeId"])
+		.where((eb) =>
+			eb.or([
+				...(twitchNames.length > 0
+					? [eb("User.twitch", "in", twitchNames)]
+					: []),
+				...(youtubeIds.length > 0
+					? [eb("User.youtubeId", "in", youtubeIds)]
+					: []),
+			]),
+		)
 		.execute();
 }

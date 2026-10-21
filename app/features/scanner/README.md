@@ -30,7 +30,7 @@ running capture (`LiveView`), a past session (`PastSessionView`) and a
 scanned VoD (`VodView`): header, clip strip, then match cards
 (`components/MatchCard.tsx`) newest first. Views are picked by the `view`
 search param (`scanner-search-params.ts`: `live`, `session&id=`,
-`vod&name=`, `clips`, `debug` and the dev-only `fixtures` and `montage`). Nothing links to
+`vod&name=`, `coach&name=` (a scanned file's coach events beside its video), `clips`, `debug` and the dev-only `fixtures` and `montage`). Nothing links to
 the `debug` screenshot view: dropping an image on the landing's File card
 opens it, for anyone, through the same handoff Inspect uses.
 
@@ -70,7 +70,11 @@ opens it, for anyone, through the same handoff Inspect uses.
   its full-res analyzed frame as a lossless WebP (~1.1 MB at 1080p, half a
   PNG; the montage's VoD scans skip it with `attachFrames: false`), live and
   VoD frames alike bounded by 72 h and a shared 500 MB budget, newest first
-  (`store/frames.ts`), the event staying with `hasFrame: false`. Clips have
+  (`store/frames.ts`), the event staying with `hasFrame: false`. A VoD scan
+  also keeps every frame of each map open from its first kept minimap read
+  on, downscaled to 960 px lossy WebP (`vod-minimaps`, `snapshotMinimaps`),
+  for coach mode's "map as last opened"; those live as long as the VoD and
+  are not trimmed. Clips have
   their own cap and outlive session deletion.
 - **Upload** is on by default when logged in (settings toggle, persisted).
   Live: a scoreboard closes its match and sends it, a 15 s tick retries
@@ -184,8 +188,9 @@ the ring would have dropped it by then:
 
 `view=montage` (Settings → Debug → Tournament montage, development only)
 builds the basis of a tournament highlight video. `pnpm vods:download <id>`
-writes the tournament's match VoDs to `scripts/output/vods/<id>/` together
-with `tournament.json` (name, start, logo, top 8, each VoD's POV team —
+writes the match VoDs of the top 8 teams (`--all-teams` for every team) to
+`scripts/output/vods/<id>/` together with `tournament.json` (name, start,
+logo, top 8, every team that played, each VoD's POV team —
 `MontageManifest` in `core/montage.ts`) and the logos it names; the view
 opens that folder through the File System Access API's directory picker
 (Chrome). `components/montage.ts` scans every VoD without games yet through
@@ -195,16 +200,20 @@ candidate, best score first (`montageWindows`): min splats (default 3) and
 a length cap per splat count before fast-forwarding (defaults 2: 20 s,
 3: 30 s, 4: 45 s, 5+: 60 s), picked on the page and kept in localStorage.
 Candidates are grouped by the POV player's base weapon (read off the
-game's scoreboard seat, variants folded to their base). Picking one hides
-that team's other candidates (a cast VoD has no team: only its own go). The scanned games, the picks (stored whole, so changing
+game's scoreboard seat, variants folded to their base) and can be filtered
+by team. Only top teams' candidates are listed: a POV VoD's under its team,
+a cast's under either side (`candidateTeamIds`), and each pick is added
+under one of them. The scanned games, the picks (stored whole, so changing
 the criteria never drops one) and the folder's handle live in the
 `montages` store (`store/montages.ts`, one record per tournament): a reload
 restores the latest montage at once and reconnects the folder itself when
 Chrome kept the permission, else `Reconnect folder` asks again.
 
 Rendering (`capture/montage-render.ts`, overlays in `montage-overlays.ts`)
-re-encodes everything at 1920×1080 60 fps: the title card, the picks in
-order, then the top 8 (player names for the top 3, and each team's comp:
+re-encodes everything at 1920×1080 60 fps: the intro card (the tournament
+and every team's avatar), then the top 8 counting down to the winner
+(`montageTeamSections`), each team's card (placement, roster and comp)
+followed by its picks in order. The comp:
 `montage-comps.ts` builds it the way the results image export does, from
 the scans alone — every scoreboard names both sides' weapons and the POV
 seat tells which side is the streamer's team, so a team needs VoDs of its
@@ -214,8 +223,13 @@ fades out after 5 s) are the image export's graphic blocks
 (`features/img-export`), mounted off screen by `MontageGraphics.tsx` in the
 dark theme and rasterized with snapdom at the scale that makes them full HD —
 the renderer asks for them through `setMontageGraphicCapture`, so the page
-must stay open. The manifest carries what they show (round names, both
-sides, the streamer, top-3 players, tier, organization, counts — no
+must stay open. Each card is captured twice, with and without its revealed
+items (the intro's team avatars, a team card's roster): the renderer draws
+the empty one and brings the items in from the other (`REVEAL_TIMINGS` in
+`montage-overlays.ts`), with a moving wave along the bottom. The page's
+Cards panel shows each card live with the same animations (to tweak its
+styles with hot reload; Replay restarts them) and downloads it as captured. The manifest carries what they show (round names, both
+sides, the streamer, rosters, tier, organization, counts — no
 weapons: those come from the scans) and the
 download script saves every image it names next to the VoDs. Dead time
 between two kills — from 3 s after one to 3 s before the next, when at
@@ -275,7 +289,7 @@ sequenceDiagram
   UI->>ING: POST { matches } (live only: on match close / stop)
   ING->>ING: resolve context (current tournament/SendouQ activity, casts via staff roles, else games reported around the play times ≥2)
   ING->>DB: merge-store IngestedMatch (matchHash, isSameMatch + merge, context hints)
-  ING->>DB: link matches to game results → IngestedMatchLink (POV weapon → ReportedWeapon; scoreboards derived at read time)
+  ING->>DB: link matches to games the sender played (POV seat in the game's active roster) → IngestedMatchLink (POV weapon → ReportedWeapon; scoreboards derived at read time)
   Note over UI: VoD "Add to VoDs": ScannerMatch → slim prefill param → /vods/new
   Note over UI: scoreWindows(match) → ring buffer / file packet copy → clips store
 ```
@@ -296,9 +310,19 @@ sequenceDiagram
   match it opened splits only once no later minimap of that game reads it. A battle history screen (battle log, replay
   browser) showing a game already built — at least 6 paint totals shared
   order-free (a misread or unread row still joins), stage not contradicting
-  it, recording time within 20 min of its play time — joins that match's sources instead of forming a new
+  it, and either 6 whole stat lines (paint, K/A, D, S) shared or the recording time within 20 min of its play time (the console clock can be hours off the PC's: another timezone, a misread AM/PM) — joins that match's sources instead of forming a new
   one, so browsing the log after playing neither adds a card nor re-uploads
-  (the match was already sent). Any other history screen closes the game
+  (the match was already sent). X Battle shows every player under a random
+  alias (a gear name) until the log is asked for the real names: a history
+  screen whose rows pair with the results screen's by stat line under other
+  names puts its names on the match (and on the POV's kills), and the
+  timeline keeps it apart from the alias read of the same entry
+  (`renamedRows`). Only a results screen's names count as aliases, so a match
+  a history screen closed keeps its first names; the upload is not redone, so
+  sendou.ink keeps the aliases. The recording time's AM/PM letter reads as
+  "o" either way, so the header tells them apart by the letter's bottom rows
+  (A stands on two legs, P on its stem): a flipped one puts the time 12h off
+  and the screen turns into a duplicate card. Any other history screen closes the game
   being gathered — a missed results screen amended from the log — unless
   the intro/minimap stage, intro mode or recording time (vs. the game's
   first read) contradicts it. Then, or with no game being gathered, it
@@ -315,7 +339,10 @@ sequenceDiagram
   timeline also holds history screens to a 0.75 confidence floor (clean
   reads score 0.81+). Likewise a results screen read again with no
   match opened since (a lost-connection dialog hid it and the detector
-  re-armed) joins the last match. An event belongs to at most one match; deaths
+  re-armed) joins the last match. A no-contest results screen (the host
+  ended the game or a disconnect did early: DRAW tags on both team boxes,
+  drawn grey, and "No contest." for a score — `noContest`) discards the game
+  being gathered, so the replay of that map is its only card. An event belongs to at most one match; deaths
   reveal enemy builds (`ability-harvest.ts`), the personal results screen
   (`ScoreboardOwn`, seen within `OWN_RESULTS_WINDOW_SECONDS` of a closed
   match's scoreboard) completes the POV player's full build, and minimap
@@ -369,52 +396,47 @@ sequenceDiagram
   objective parse also emits a second
   event type per read: `PlayerStatus`
   (`core/detectors/objective/player-status.ts`), per-player special/dead
-  flags off the icon strip flanking the timer (three geometries named by
-  which side sits at the packed pitch — `even`, `narrow-right`,
-  `narrow-left` — that are pure geometry, never footage type: S3 POV
-  footage draws both narrow arrangements too, so only the D-pad camera
-  badges prove a broadcast, reported as the read's `cast: true | null` —
-  each geometry has its own badge row, the SWS26 broadcast draws `even`
-  badges included;
-  broadcasts can hide the badges while keeping their geometry, so a
-  badge-less frame scores the geometries on how decisively the bodies
-  read and sticks with the established layout unless another wins
-  clearly, or unless the slot comb — which is positional, so it sees a
-  pitch the body reads cannot — decisively picks a geometry (even needs
-  the widest win) or puts narrow-right decisively ahead of a latched
-  `even`, as happens when a spectator toggles between the overhead map and
-  a player POV mid-match, and in S3 POV itself, which resizes each side's
-  icons as the objective swings and so cycles through all three
-  geometries within one game — the special-ready wash also pulses, so its dim trough is told
-  apart from a splat by its team tint: a splat is a neutral grey plate under
-  a grey X, which a blown-out backdrop turns near-white while a wash stays
-  tinted at every pulse phase (a big dark weapon render such as the
-  Nautilus drum dilutes that tint, but a diluted wash still reads pale,
-  which a tinted splat never does; a pale backdrop showing through a
-  splat's translucent plate tints it like a wash, but the X's grey strokes
-  over the dark squid still give it away), and a ready read
-  must also see a washed (ink-poor) body: pale backdrop, a ship's hull or
-  the lead banner leaking past an icon edge fakes the shoulder glow, and a ready the shoulder glow does
-  not corroborate needs the body's ink gone rather than merely paled,
-  since a near-white weapon render (S-BLAST '91) pales a live body
-  without emptying it; an inky wash must also read tinted, which a white
-  cloud behind the icon does not), with
-  the same `time` value so the two reads pair downstream; its fixtures
-  live under `tests/fixtures/player-status/`. Within a side the strip's
-  slot order is the lobby seating, while the results scoreboard re-sorts
-  each team per game (attested in the sendou-triton VoD: strip [Planetz,
+  flags off the icon strip flanking the timer. The strip's geometry is
+  fitted per read, not picked from known arrangements: the game resizes
+  each side continuously (S3 POV swings it with the objective, a splatted
+  POV player shrinks it, spectators toggle the overhead map, broadcasts
+  mirror it), through in-between pitches, so each side's (pitch, inner
+  icon center) is searched for the hypothesis whose four kite apexes stand
+  out most cleanly from the backdrop beside them — the apex is the one part
+  no weapon render, gauge digit or badge covers, and its triangle core sits
+  inside an octoling's dome too — plus how much more team ink they hold
+  than their surroundings; the previous read's fit holds unless clearly
+  beaten. Each state then reads off the apex core alone: saturated ink of
+  any hue = alive, pale = special ready (the wash pulses from lilac or pink
+  to near-white but never saturates or greys) unless both sides of the
+  body still hold team ink (a weapon render pale over the apex, Painbrush's
+  head: the wash pales the whole icon), else splatted (dark plate
+  under grey X strokes) — unless the whole body is opaque black with no X
+  or weapon render in it, an empty seat (a 1v1 lobby, a disconnect), which
+  sets neither flag. No geometry implies a footage type: the D-pad camera
+  badges prove a broadcast, reported as `cast: true | null`, but never
+  place the strip, since a white backdrop under a POV strip fakes them now
+  and then. Emitted
+  with the same `time` value so the two reads pair downstream; its fixtures
+  live under `tests/fixtures/player-status/`. Within a side the strip keeps its
+  own slot order (it can change every game), while the results scoreboard
+  re-sorts each team (attested in the sendou-triton VoD: strip [Planetz,
   .52, Neo Splash, Snipewriter] vs rows [.52, Neo Splash, Snipewriter,
-  Planetz], and the orders differ per game while the seating holds) — so
-  every 5th counter read also samples a `StripWeapons` evidence event: a
-  ranked weapon-icon match per alive slot (the squid plate's team ink is
-  hue-knocked-out to flat grey first; splatted slots grey the render out
-  and are skipped). Single reads rank the true weapon top-1 only about
-  half the time; the builder aggregates them across the match — plus the
-  minimap cards' parsed weapons, whose column order mirrors the strip
-  seating (attested for the enemy column) — and takes the best-scoring of
-  the 24 slot→row assignments against the scoreboard's weapons
-  (`core/slot-row-assignment.ts`), falling back to as-drawn order on thin
-  or tied evidence. The POV overlay's teammate diamond follows neither
+  Planetz]) — so every 5th counter read also samples a `StripWeapons`
+  evidence event: a ranked weapon-icon match per alive slot. The fit pins
+  each icon's center and scale, so the slot is resampled to the reference
+  pitch and scored against every weapon's game icon at that one size over
+  the art's opaque pixels only (masked NCC — the team-ink plate and the
+  scene behind it never weigh in); the true weapon ranks top-1 on ~93% of
+  single reads, including special-ready washes. The builder solves each
+  side's slot→row assignment once per game from one evidence matrix
+  (`core/slot-row-assignment.ts`): strip votes (a read's score over its
+  candidate floor), the minimap cards' parsed weapons (the enemy column
+  mirrors the strip seating), and the states of players known by name —
+  the POV's own death screens, its kill-feed victims and the POV minimap's
+  named teammate cards — against the strip read beside them, which tells
+  apart two rows sharing a weapon. Thin or tied evidence keeps the
+  as-drawn order. The POV overlay's teammate diamond follows neither
   order and maps by card name instead. Strip-weapon fixtures live under
   `tests/fixtures/strip-weapons/`. The builder additionally
   flips sub-2s dead-flag runs flanked by dense opposite reads — a splat
@@ -422,8 +444,8 @@ sequenceDiagram
   bleeding through a crossed-out icon) — and bridges sub-10s not-ready
   gaps between ready reads when no death inside the gap explains them (no
   special regains that fast, so the gap is the wash's dim pulse trough);
-  for the same reason ready reads in the clock's first 10s (5:00-4:51) or
-  before it starts are dropped before bridging, timerless minimap reads
+  for the same reason ready reads in the clock's first 10s (5:00-4:51,
+  TW 3:00-2:51) or before it starts are dropped before bridging, timerless minimap reads
   timed by the match's dominant clock anchor. Objective reads land on `ScannerMatch` as
   progress samples anchored to the game clock; broadcast replay wipes re-run
   an earlier moment with the counter intact, so the builder keeps only the
@@ -440,26 +462,30 @@ sequenceDiagram
   mode doesn't draw (plates on TC/RM, a track on SZ/CB) are lookalike
   misreads the builder leaves out, and on Turf War every read is: the
   builder nulls that match's `objective` and callers discard the events
-  (`invalidObjectiveEvents`; Live also stops collecting once a MapStart
+  (`invalidObjectiveEvents`; Live also stops collecting them once a MapStart
   reveals Turf War). A match with no mode read, or whose intro and results
   screen disagree on it, builds from its majority overlay (a plates
-  objective's `mode` then stays null: SZ or CB) and discards nothing. PlayerStatus reads follow the
-  objective pipeline wholesale: same replay-wipe anchor, cast orientation
-  inherited from the nearest counter read, nulled together on TW matches, and rendered as
+  objective's `mode` then stays null: SZ or CB) and discards nothing. Turf
+  War draws the timer and icon strip with no counter under them: the gate's
+  `timer` variant (timer box plus its colon's two dots, which a dark minimap
+  card pill lacks) emits the strip reads alone, timed by the timer read
+  (no readable timer, nothing emitted) — as it does on a ranked frame whose
+  counter fails to read. PlayerStatus reads follow the
+  objective pipeline: same replay-wipe anchor, cast orientation
+  inherited from the nearest counter read (none on TW: as drawn), and rendered as
   per-player splat/special bands (`~/components/PlayerStatusTimeline.tsx`,
   shared with the match page) above the objective chart. Minimap reads
   feed the same samples: every card/row carries `dead` (respawn
   cross-out) and `specialReady` (special camo) flags, merged in timerless
-  on the shared replay anchor — and mode-agnostic, so a Turf War
-  match keeps its minimap-sourced samples while its counter/status
-  misreads are voided. Parsing details
+  on the shared replay anchor. Parsing details
   are in each detector's module
   header; accuracy-critical matching internals in `core/glyphs.ts` and
   `core/detectors/scoreboard/weapons.ts` — read those before touching
   recognition code. Parse cost matters live (a stalled worker drops
   frames): a CJK splash-tag name once cost tens of seconds per death
   parse, which is why the death detector memoizes tag reads on a
-  downscaled tag signature (same killer recurs pixel-identical), the kill
+  downscaled tag signature (same killer recurs pixel-identical; a per-cell
+cap keeps two names on one plain banner apart, their means barely differ), the kill
   detector memoizes each feed row's read on its text-band signature (a row
   is re-read twice a second for as long as it shows, and shifts up intact
   when a newer one enters; the per-cell cap of the signature compare is
@@ -565,8 +591,13 @@ sequenceDiagram
   space; every frame is normalized to that size first — black bars around the
   picture (letterbox/pillarbox, or a scene drawing the game smaller than its
   canvas) are cropped away before the resize (`detectContentBox` in
-  `core/canonical.ts`; a bar must be level and ≥1% deep, since the Recent
-  Battles screen's own scanline-textured edge is dark but neither). A
+  `core/canonical.ts`). Each edge is split into 16 segments that each walk
+  inward while level with the edge (plus a soft inner edge when lit picture
+  follows within 1%); segments agreeing on a depth vote for it, so a webcam
+  or alert box drawn over part of a bar only costs the segments it covers,
+  and the per-edge depths combine into the best-voted 16:9 box (within 0.5%).
+  A bar must be level and ≥1% deep, since the Recent Battles screen's own
+  scanline-textured edge is dark but neither. A
   layout drawn in perspective (the quick battle log card) additionally
   names a `RECTIFY` quad: its ROIs are in the frame warped by that
   homography, which the debug overlays map back onto the raw frame.
@@ -756,7 +787,8 @@ with the objective's icon riding it and a "Remaining" plate per team hanging
 under the furthest point that team pushed to — so a team's plate always sits
 on the half it pushes into, and the left team pushes right. The gate tells the
 track from the SZ plates by the dots, which sit at a fixed pitch and phase in
-every lobby (a comb projected at that phase). The icon is scored
+every lobby (a comb projected at that phase, per window, with the two
+worst windows dropped so a marker or backdrop edge can't sink it). The icon is scored
 procedurally (held: team-ink disc around a white glyph; neutral: white ring
 around an olive disc), its x mapped linearly to `position` -100..100; the
 holder is the icon's ink against each team's ink off its own track end (end
@@ -776,7 +808,8 @@ the game start charts both counts full from the clock's start until each
 side's first read (`withFullCountsAtGameStart`); later unread counts stay
 gaps, since a count never rises. Fixtures: `objective/tower-*`,
 `objective/rainmaker-*` (tower_control / rainmaker VoDs plus TC/RM death
-frames symlinked).
+frames symlinked). Turf War strip reads: `player-status/turf-war-*` (tw VoD,
+kill and strip-weapon fixtures symlinked to them).
 
 ## X Battle cards
 
@@ -788,7 +821,9 @@ header, one VICTORY/DEFEAT tile per game in play order, X Power and its
 signed change) followed by `XRankPosition` ("#259" and an up/down arrow, or a
 flat one when the position held).
 Every card carries the mode off its icon (`img/modes/*`, RGB templates on
-black). Numbers are BlitzBold, read with the team-digit atlas rescaled;
+black). The Anarchy Series card after a series game draws the count card's
+layout too, but with five win slots: ink where only it has slots fails the
+count gate (`negative/anarchy-series-card-*`). Numbers are BlitzBold, read with the team-digit atlas rescaled;
 punctuation ("." "-" "+") is told apart by ink-run geometry since the digit
 templates can't match anything smaller than themselves.
 
@@ -800,7 +835,10 @@ direction. So no detector sets `sufficientConfidence` (the first clean read
 is the stale one), each gate returns a `signature` over its numbers, and the
 timeline orders same-type reads by `animationProgressByType` instead of
 confidence: a further-along read replaces the kept one, an earlier one
-merges into it. A count read whose digits disagree with its slots, or a set
+merges into it. The count's end can fall between two sampled frames (a 2 fps
+live capture), so a set result read after the change lands takes its power
+from the power before it plus the change whenever an earlier read showed the
+old value (`carryOverByType`); the old value holds ~1.5s, the final one ~1s. A count read whose digits disagree with its slots, or a set
 result whose header doesn't describe a decided set of tiles (tiles still
 popping in), scores under the timeline floor. The result tiles center on
 the card (five games three over two, four two over two, three in one row

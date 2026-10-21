@@ -1,8 +1,8 @@
-import { type ActionFunction, redirect } from "react-router";
+import { redirect } from "react-router";
 import type * as v from "valibot";
 import { requireUser } from "~/features/auth/core/user.server";
+import { defineAction } from "~/form/define-action.server";
 import type { WeaponPoolItem } from "~/form/fields/WeaponPoolFormField";
-import { parseFormData } from "~/form/parse.server";
 import type { MainWeaponId, StageId } from "~/modules/in-game-lists/types";
 import { requireRole } from "~/modules/permissions/guards.server";
 import { vodVideoPage } from "~/utils/urls";
@@ -10,36 +10,33 @@ import * as VodRepository from "../VodRepository.server";
 import { vodFormSchemaServer } from "../vods-schemas.server";
 import type { VideoBeingAdded } from "../vods-types";
 
-export const action: ActionFunction = async ({ request }) => {
-	const user = requireUser();
-	requireRole("VIDEO_ADDER");
+export const action = defineAction(
+	{ body: vodFormSchemaServer },
+	async ({ body }) => {
+		const user = requireUser();
+		requireRole("VIDEO_ADDER");
 
-	const result = await parseFormData({
-		request,
-		schema: vodFormSchemaServer,
-	});
+		// players are saved per weapon, a match without weapons would lose its POV
+		const missingWeaponErrors = missingWeaponFieldErrors(body);
+		if (missingWeaponErrors) return { fieldErrors: missingWeaponErrors };
 
-	if (!result.success) {
-		return { fieldErrors: result.fieldErrors };
-	}
+		const video = transformFormDataToVideo(body);
 
-	const formData = result.data;
-	const video = transformFormDataToVideo(formData);
+		const savedVideo = body.vodToEditId
+			? await VodRepository.update({
+					...video,
+					isValidated: true,
+					id: body.vodToEditId,
+				})
+			: await VodRepository.insert({
+					...video,
+					submitterUserId: user.id,
+					isValidated: true,
+				});
 
-	const savedVideo = formData.vodToEditId
-		? await VodRepository.update({
-				...video,
-				isValidated: true,
-				id: formData.vodToEditId,
-			})
-		: await VodRepository.insert({
-				...video,
-				submitterUserId: user.id,
-				isValidated: true,
-			});
-
-	throw redirect(vodVideoPage(savedVideo.id));
-};
+		throw redirect(vodVideoPage(savedVideo.id));
+	},
+);
 
 type VodFormData = v.InferOutput<typeof vodFormSchemaServer>;
 
@@ -68,6 +65,28 @@ function transformFormDataToVideo(data: VodFormData): VideoBeingAdded {
 						: [],
 		})),
 	};
+}
+
+function missingWeaponFieldErrors(data: VodFormData) {
+	const teamSize = data.teamSize ? Number(data.teamSize) : 4;
+	const fieldErrors: Record<string, string> = {};
+
+	for (const [matchIdx, match] of data.matches.entries()) {
+		if (data.type !== "CAST") {
+			if (typeof match.weapon !== "number") {
+				fieldErrors[`matches[${matchIdx}].weapon`] = "forms:errors.required";
+			}
+			continue;
+		}
+
+		for (const team of ["weaponsTeamOne", "weaponsTeamTwo"] as const) {
+			if ((match[team]?.length ?? 0) < teamSize) {
+				fieldErrors[`matches[${matchIdx}].${team}`] = "forms:errors.required";
+			}
+		}
+	}
+
+	return Object.keys(fieldErrors).length > 0 ? fieldErrors : null;
 }
 
 function weaponPoolToIds(pool: WeaponPoolItem[]): MainWeaponId[] {

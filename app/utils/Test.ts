@@ -14,6 +14,7 @@ import {
 	getUserFromRequest,
 	userAsyncLocalStorage,
 } from "~/features/auth/core/user-context.server";
+import { RENDERS_FIELD_ERRORS_KEY } from "~/form/utils";
 import type { AnySchema } from "~/utils/schema";
 import { logger } from "./logger";
 
@@ -65,7 +66,7 @@ export function wrappedAction<T extends AnySchema>({
 		} = {},
 	) => {
 		const body = isJsonSubmission
-			? JSON.stringify(args)
+			? JSON.stringify({ ...args, [RENDERS_FIELD_ERRORS_KEY]: true })
 			: new URLSearchParams(args as any);
 		const request = new Request(new URL(url, "http://app.com"), {
 			method: "POST",
@@ -81,7 +82,7 @@ export function wrappedAction<T extends AnySchema>({
 			],
 		});
 
-		const userFromRequest = await getUserFromRequest(
+		const { user: userFromRequest } = await getUserFromRequest(
 			request,
 			new URL(request.url),
 		);
@@ -141,7 +142,7 @@ export function wrappedLoader<T>({
 			],
 		});
 
-		const userFromRequest = await getUserFromRequest(
+		const { user: userFromRequest } = await getUserFromRequest(
 			request,
 			new URL(request.url),
 		);

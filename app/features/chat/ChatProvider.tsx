@@ -7,7 +7,8 @@ import {
 } from "~/features/events/events-hooks";
 import { chatRoomChannel } from "~/features/events/events-types";
 import { useHydrated } from "~/hooks/useHydrated";
-import { useLayoutSize } from "~/hooks/useLayoutSize";
+import { useLatestRef } from "~/hooks/useLatestRef";
+import { type LayoutSize, useLayoutSize } from "~/hooks/useLayoutSize";
 import { useSearchParam } from "~/modules/search-params/hooks";
 import type { LoggedInUser } from "~/root";
 import {
@@ -114,6 +115,7 @@ function ChatProviderInner({
 	useServerRevalidationEvents(user.id);
 
 	const hydrated = useHydrated();
+	const layoutSize = useLayoutSize();
 	const routeRooms = useCurrentRouteChatRooms();
 
 	const storeSnapshot = React.useSyncExternalStore(
@@ -171,7 +173,10 @@ function ChatProviderInner({
 		.filter((room) => room.autoOpen)
 		.map((room) => room.room.id)
 		.join(",");
-	const [chatOpenState, setChatOpenState] = React.useState(false);
+	// null until the route sync has settled it
+	const [chatOpenState, setChatOpenState] = React.useState<boolean | null>(
+		null,
+	);
 	const [activeRoomIds, setActiveRoomIds] = React.useState<number[]>(() =>
 		roomIdsFromKey(autoOpenRoomIdsKey),
 	);
@@ -179,10 +184,11 @@ function ChatProviderInner({
 		number | null
 	>(null);
 	// the server renders a route's rooms open as the desktop layout has them
-	// (smaller layouts hide the rail); the route sync settles it once the
-	// layout is known
+	// (smaller layouts hide the rail) and keeps them so until the route sync
+	// settles it, sparing the desktop rail an unmount and remount on hydration
 	const chatOpen =
-		chatOpenState || (!hydrated && autoOpenRoomIdsKey.length > 0);
+		chatOpenState ??
+		(autoOpenRoomIdsKey.length > 0 && layoutSize === "desktop");
 
 	// messages arriving to a room on screen are read immediately instead of
 	// counting unread, but only while the user pays attention to the tab (it is
@@ -229,6 +235,7 @@ function ChatProviderInner({
 	useChatRouteSync({
 		userId: user.id,
 		hydrated,
+		layoutSize,
 		roomsLoaded: snapshot.roomsLoaded,
 		rooms,
 		observedRoomIds: snapshot.observedRoomIds,
@@ -325,8 +332,7 @@ function useOpenChatFromSearchParam({
 	openChat: (roomIds: number[], selectedRoomId: number) => void;
 }) {
 	const [chatRoomId, setChatRoomId] = useSearchParam(chatSearchParams, "chat");
-	const openChatRef = React.useRef(openChat);
-	openChatRef.current = openChat;
+	const openChatRef = useLatestRef(openChat);
 
 	// declared after the route sync so the room opened here is not replaced by the route's own
 	React.useEffect(() => {
@@ -353,6 +359,7 @@ function useOpenChatFromSearchParam({
 function useChatRouteSync({
 	userId,
 	hydrated,
+	layoutSize,
 	roomsLoaded,
 	rooms,
 	observedRoomIds,
@@ -363,21 +370,20 @@ function useChatRouteSync({
 }: {
 	userId: number;
 	hydrated: boolean;
+	layoutSize: LayoutSize;
 	roomsLoaded: boolean;
 	rooms: ChatRoomListItem[];
 	observedRoomIds: ReadonlySet<number>;
 	routeRooms: RouteChatRoom[];
 	autoOpenRoomIdsKey: string;
 	setActiveRoomIds: React.Dispatch<React.SetStateAction<number[]>>;
-	setChatOpenState: (open: boolean) => void;
+	setChatOpenState: React.Dispatch<React.SetStateAction<boolean | null>>;
 }) {
 	// keys rather than the arrays themselves: a route revalidation hands over
 	// equal-but-new loader data that must not re-run the effects
 	const routeRoomIdsKey = routeRooms.map((room) => room.room.id).join(",");
-	const latestRouteRoomsRef = React.useRef(routeRooms);
-	latestRouteRoomsRef.current = routeRooms;
+	const routeRoomsRef = useLatestRef(routeRooms);
 	const { pathname } = useLocation();
-	const layoutSize = useLayoutSize();
 	const previousRouteRoomIdsKeyRef = React.useRef<string | null>(null);
 	const previousPathnameRef = React.useRef<string | null>(null);
 
@@ -398,6 +404,8 @@ function useChatRouteSync({
 		// the hydration render's layout size is the server's guess, so a room
 		// opening on arrival waits for the real one
 		if (!roomsLoaded || !hydrated) return;
+
+		setChatOpenState((open) => open ?? false);
 
 		// route sync opens its own rooms directly: going through the context's
 		// `setChatOpen` would read the previous render's empty `activeRoomIds` and
@@ -426,7 +434,7 @@ function useChatRouteSync({
 
 			// the loader can know about a just-created room of the user's own before
 			// the room list does: refetched so it gets listed rather than merely observed
-			const unlistedOwnRoom = latestRouteRoomsRef.current.find(
+			const unlistedOwnRoom = routeRoomsRef.current.find(
 				(entry) =>
 					entry.room.participantUserIds.includes(userId) &&
 					!rooms.some((room) => room.id === entry.room.id),
@@ -442,7 +450,7 @@ function useChatRouteSync({
 			setActiveRoomIds(autoOpenRoomIds);
 			// a room opening on arrival brings its history along; one that did not
 			// (an older loader response) is fetched
-			for (const entry of latestRouteRoomsRef.current) {
+			for (const entry of routeRoomsRef.current) {
 				if (entry.autoOpen && entry.messages === null) {
 					chatClient.ensureMessagesLoaded(entry.room.id);
 				}

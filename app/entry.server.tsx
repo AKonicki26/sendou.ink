@@ -8,6 +8,7 @@ import {
 	type EntryContext,
 	type HandleDataRequestFunction,
 	type HandleErrorFunction,
+	isRouteErrorResponse,
 	type RouterContextProvider,
 	ServerRouter,
 } from "react-router";
@@ -83,7 +84,7 @@ async function handleRequest(
 	});
 }
 
-/** Lets the browser reuse a hover-prefetched loader response on the click that follows it. */
+/** Lets the browser reuse a hover-prefetched loader response on the click that follows it. Varies by cookie so that a mutation (see `invalidatePrefetchedLoaderData` in entry.client.tsx) or a log in invalidates it. */
 export const handleDataRequest: HandleDataRequestFunction = (
 	response,
 	{ request },
@@ -151,7 +152,10 @@ process.on("unhandledRejection", (reason: string, p: Promise<any>) => {
 });
 
 // routes through logger so the request id shows in server logs
-export const handleError: HandleErrorFunction = (error) => {
+export const handleError: HandleErrorFunction = (error, { request }) => {
+	if (request.signal.aborted) return;
+	if (isRouteErrorResponse(error) && error.status < 500) return;
+
 	logger.error(error);
 };
 export default handleRequest;

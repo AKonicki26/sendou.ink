@@ -89,6 +89,7 @@ import {
 import { UserCard } from "~/features/user-card/components/UserCard";
 import type { UserCardData } from "~/features/user-card/user-card-types";
 import type { CustomFieldRenderProps } from "~/form/FormField";
+import { DatetimeFormField } from "~/form/fields/DatetimeFormField";
 import { SendouForm } from "~/form/SendouForm";
 import type { MainWeaponId, StageId } from "~/modules/in-game-lists/types";
 import type { SendouRouteHandle } from "~/utils/remix.server";
@@ -380,6 +381,29 @@ function ButtonsSection({ id }: { id: string }) {
 					<SendouButton isDisabled>Disabled Button</SendouButton>
 				</ComponentRow>
 
+				<ComponentRow label="Pending">
+					<div className="stack horizontal sm items-center flex-wrap">
+						<SendouButton isPending>Primary</SendouButton>
+						<SendouButton isPending variant="outlined">
+							Outlined
+						</SendouButton>
+						<SendouButton isPending variant="destructive" icon={<Trash />}>
+							Delete
+						</SendouButton>
+						<SendouButton isPending variant="minimal">
+							Minimal
+						</SendouButton>
+						<SendouButton isPending size="small">
+							Small
+						</SendouButton>
+						<SendouButton isPending shape="circle" icon={<SquarePen />} />
+					</div>
+				</ComponentRow>
+
+				<ComponentRow label="Pending (click)">
+					<PendingButtonDemo />
+				</ComponentRow>
+
 				<Divider smallText>Link Buttons</Divider>
 
 				<ComponentRow label="Internal Link">
@@ -399,6 +423,22 @@ function ButtonsSection({ id }: { id: string }) {
 				</ComponentRow>
 			</div>
 		</Section>
+	);
+}
+
+function PendingButtonDemo() {
+	const [isPending, setIsPending] = useState(false);
+
+	return (
+		<SendouButton
+			isPending={isPending}
+			onClick={() => {
+				setIsPending(true);
+				setTimeout(() => setIsPending(false), 2000);
+			}}
+		>
+			Save changes
+		</SendouButton>
 	);
 }
 
@@ -454,6 +494,7 @@ function InputsSection({ id }: { id: string }) {
 
 				<ComponentRow label="With Icon">
 					<Input
+						type="search"
 						icon={<Search />}
 						placeholder="Search..."
 						aria-label="Search"
@@ -580,21 +621,6 @@ function SelectSection({ id }: { id: string }) {
 					<SendouSelect
 						items={SELECT_ITEMS}
 						label="Select with description"
-						placeholder="Select..."
-					>
-						{(item) => (
-							<SendouSelectItem key={item.id} id={item.id}>
-								{item.name}
-							</SendouSelectItem>
-						)}
-					</SendouSelect>
-				</ComponentRow>
-
-				<ComponentRow label="With Error">
-					<SendouSelect
-						items={SELECT_ITEMS}
-						label="Select with error"
-						errorText="This field is required"
 						placeholder="Select..."
 					>
 						{(item) => (
@@ -2520,7 +2546,7 @@ function SubNavSection({ id }: { id: string }) {
 
 function DatePickerSection({ id }: { id: string }) {
 	const [calendarValue, setCalendarValue] = useState(new Date(2024, 11, 27));
-	const [datePickerValue, setDatePickerValue] = useState<Date | null>(
+	const [datePickerValue, setDatePickerValue] = useState(
 		new Date(2024, 11, 27),
 	);
 
@@ -2528,7 +2554,7 @@ function DatePickerSection({ id }: { id: string }) {
 		if (value) setCalendarValue(value);
 	};
 
-	const handleDatePickerChange = (value: typeof datePickerValue | null) => {
+	const handleDatePickerChange = (value: Date | null | undefined) => {
 		if (value) setDatePickerValue(value);
 	};
 
@@ -2547,29 +2573,44 @@ function DatePickerSection({ id }: { id: string }) {
 				<ComponentRow label="DatePicker">
 					<SendouDatePicker
 						granularity="day"
-						label="Select Date"
+						aria-label="Select Date"
 						value={datePickerValue}
 						onChange={handleDatePickerChange}
 					/>
 				</ComponentRow>
 
-				<ComponentRow label="DatePicker with Bottom Text">
-					<SendouDatePicker
+				<ComponentRow label="DatetimeFormField with Bottom Text">
+					<DatetimeFormField
+						name="showcase-event-date"
 						granularity="day"
 						label="Event Date"
+						required={false}
 						value={datePickerValue}
 						onChange={handleDatePickerChange}
 						bottomText="Choose the date for your event"
 					/>
 				</ComponentRow>
 
-				<ComponentRow label="DatePicker Required">
-					<SendouDatePicker
+				<ComponentRow label="DatetimeFormField Required">
+					<DatetimeFormField
+						name="showcase-required-date"
 						granularity="day"
 						label="Required Date"
+						required
 						value={datePickerValue}
 						onChange={handleDatePickerChange}
-						isRequired
+					/>
+				</ComponentRow>
+
+				<ComponentRow label="DatetimeFormField with Error">
+					<DatetimeFormField
+						name="showcase-error-date"
+						granularity="day"
+						label="Date with error"
+						required={false}
+						value={datePickerValue}
+						onChange={handleDatePickerChange}
+						error="This field is required"
 					/>
 				</ComponentRow>
 			</div>

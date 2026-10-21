@@ -6,7 +6,7 @@ import { actorId } from "~/features/auth/core/user.server";
 import type { MapPool } from "~/features/map-list-generator/core/map-pool";
 import type { ModeShort, StageId } from "~/modules/in-game-lists/types";
 import { flatZip } from "~/utils/arrays";
-import { databaseTimestampNow, dateToDatabaseTimestamp } from "~/utils/dates";
+import { databaseTimestampNow } from "~/utils/dates";
 import { shortNanoid } from "~/utils/id";
 import { invariant } from "~/utils/invariant";
 import {
@@ -83,8 +83,11 @@ export function setActiveRoster({
 		.execute();
 }
 
-const regOpenTournamentTeamsByJoinedUserId = (userId: number) =>
-	db
+const regOpenTournamentTeamsByJoinedUserId = (
+	userId: number,
+	trx: Transaction<DB>,
+) =>
+	trx
 		.selectFrom("TournamentTeamMember")
 		.innerJoin(
 			"TournamentTeam",
@@ -145,11 +148,15 @@ export function updateMemberInGameName({
 /** Updates the acting user's in-game name in tournaments not yet started, returning the ids of those tournaments. */
 export async function updateOwnMemberInGameNameForNonStarted(
 	inGameName: string,
+	trx: Transaction<DB>,
 ): Promise<number[]> {
 	const userId = actorId();
-	const tournamentTeams = await regOpenTournamentTeamsByJoinedUserId(userId);
+	const tournamentTeams = await regOpenTournamentTeamsByJoinedUserId(
+		userId,
+		trx,
+	);
 
-	await db
+	await trx
 		.updateTable("TournamentTeamMember")
 		.set({ inGameName })
 		.where("TournamentTeamMember.userId", "=", userId)
@@ -195,7 +202,7 @@ export function insert({
 			.returning("id")
 			.executeTakeFirstOrThrow();
 
-		const isSub = (await registrationClosedNow(trx, tournamentId)) ? 1 : 0;
+		const isSub = toDBBoolean(await registrationClosedNow(trx, tournamentId));
 
 		const inGameName = await resolveInGameName({ tournamentId, userId }, trx);
 
@@ -659,7 +666,7 @@ export function checkIn(
 		await trx
 			.insertInto("TournamentTeamCheckIn")
 			.values({
-				checkedInAt: dateToDatabaseTimestamp(new Date()),
+				checkedInAt: databaseTimestampNow(),
 				tournamentTeamId,
 				bracketIdx,
 			})
@@ -698,7 +705,7 @@ export function checkOut({
 			await trx
 				.insertInto("TournamentTeamCheckIn")
 				.values({
-					checkedInAt: dateToDatabaseTimestamp(new Date()),
+					checkedInAt: databaseTimestampNow(),
 					tournamentTeamId,
 					bracketIdx,
 					isCheckOut: 1,
@@ -815,7 +822,7 @@ export function join({
 		}
 
 		const inGameName = await resolveInGameName({ tournamentId, userId }, trx);
-		const isSub = (await registrationClosedNow(trx, tournamentId)) ? 1 : 0;
+		const isSub = toDBBoolean(await registrationClosedNow(trx, tournamentId));
 
 		await trx
 			.insertInto("TournamentTeamMember")

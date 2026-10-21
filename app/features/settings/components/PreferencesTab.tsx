@@ -18,6 +18,7 @@ import {
 	disableBuildAbilitySortingSchema,
 	disallowScrimPickupsFromUntrustedSchema,
 	spoilerFreeModeSchema,
+	voicePushToTalkSchema,
 } from "../settings-schemas";
 
 export function PreferencesTab() {
@@ -56,6 +57,17 @@ export function PreferencesTab() {
 					schema={spoilerFreeModeSchema}
 					defaultValues={{
 						newValue: user.preferences.spoilerFreeMode ?? false,
+					}}
+					mode="autoSubmit"
+					revalidateRoot
+					fullWidth
+				>
+					{({ FormField }) => <FormField name="newValue" />}
+				</SendouForm>
+				<SendouForm
+					schema={voicePushToTalkSchema}
+					defaultValues={{
+						newValue: user.preferences.voicePushToTalk ?? false,
 					}}
 					mode="autoSubmit"
 					revalidateRoot
@@ -107,15 +119,13 @@ function PushNotificationsEnabler() {
 		if (permission !== "granted") return;
 
 		subscribeInFlight.current = true;
-		try {
-			setSubscribeFailed(false);
-			await subscribeToPush();
+		setSubscribeFailed(false);
+		const subscribed = await trySubscribeToPush();
+		subscribeInFlight.current = false;
+		if (subscribed) {
 			setHasSubscription(true);
-		} catch (err) {
-			logger.error("Failed to enable push notifications", err);
+		} else {
 			setSubscribeFailed(true);
-		} finally {
-			subscribeInFlight.current = false;
 		}
 	}
 
@@ -174,4 +184,14 @@ function PushNotificationsEnabler() {
 			</FormMessage>
 		</div>
 	);
+}
+
+async function trySubscribeToPush() {
+	try {
+		await subscribeToPush();
+		return true;
+	} catch (err) {
+		logger.error("Failed to enable push notifications", err);
+		return false;
+	}
 }

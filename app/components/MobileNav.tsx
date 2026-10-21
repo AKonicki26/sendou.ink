@@ -10,7 +10,6 @@ import {
 	Tv,
 	User,
 	Users,
-	X,
 } from "lucide-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
@@ -21,6 +20,7 @@ import { useChatContext } from "~/features/chat/ChatProvider";
 import { FriendMenu } from "~/features/friends/components/FriendMenu";
 import { SENDOUQ_ACTIVITY_LABEL } from "~/features/friends/friends-constants";
 import { useClosePopoversOnNavigation } from "~/hooks/useClosePopoversOnNavigation";
+import { useHydrated } from "~/hooks/useHydrated";
 import { useLayoutSize } from "~/hooks/useLayoutSize";
 import { useScrollLock } from "~/hooks/useScrollLock";
 import { useUnseenFriendRequests } from "~/hooks/useUnseenFriendRequests";
@@ -37,6 +37,10 @@ import {
 } from "~/utils/urls";
 import { Avatar } from "./Avatar";
 import { EventsList } from "./EventsList";
+import {
+	SendouBottomSheet,
+	SendouBottomSheetCloseButton,
+} from "./elements/BottomSheet";
 import { LinkButton } from "./elements/Button";
 import { isOwnToggle } from "./elements/Popover";
 import { Image } from "./Image";
@@ -44,6 +48,7 @@ import { ChatSidebar } from "./layout/ChatSidebar";
 import { LogInButtonContainer } from "./layout/LogInButtonContainer";
 import {
 	NotificationContent,
+	useMarkNotificationsSeenWhileOpen,
 	useNotifications,
 } from "./layout/NotificationPopover";
 import { navItems } from "./layout/nav-items";
@@ -56,17 +61,24 @@ type SidebarData = RootLoaderData["sidebar"] | undefined;
 type PanelType = (typeof PANEL_TYPES)[number];
 type PanelIds = Record<PanelType, string>;
 type PanelToggleHandler = (event: React.ToggleEvent<HTMLDivElement>) => void;
+type TabClickHandler = (event: React.MouseEvent<HTMLButtonElement>) => void;
 
 const MOBILE_NAV_ID = "mobile-nav";
 const PANEL_TYPES = ["menu", "friends", "tourneys", "chat", "you"] as const;
 
 /**
  * The bottom tab bar and its panels. The panels are native popovers opened by
- * the tabs, so they work before hydration; opening one closes the other and the
- * tab bar stays usable underneath. The state here only mirrors them.
+ * the tabs; opening one closes the other and the tab bar stays usable
+ * underneath. The state here only mirrors them. The menu and the chat open
+ * before hydration too; the other panels mount their contents on first open,
+ * so their tabs work only once hydrated.
  *
  * The bar itself is a manual popover shown on hydration so it lives in the top
  * layer; before that it is a plain fixed bar.
+ *
+ * Once hydrated, while a panel is open every tab targets it, so pressing a tab
+ * does not light dismiss it. The tab's click then swaps the panels in one go,
+ * as on touch devices the click can come frames after the press.
  */
 export function MobileNav({ sidebarData }: { sidebarData: SidebarData }) {
 	const [activePanel, setActivePanel] = React.useState<PanelType | null>(null);
@@ -139,9 +151,23 @@ export function MobileNav({ sidebarData }: { sidebarData: SidebarData }) {
 			}
 		};
 
-	// a panel taking another one's place appears in place instead of sliding
-	// up again; decided as the tab is pressed, before the popovers switch
-	const rememberOpenPanel = () => setSkipAnimation(activePanel !== null);
+	const onTabClick =
+		(panel: PanelType): TabClickHandler =>
+		(event) => {
+			const target = document.getElementById(panelIds[panel]);
+			if (!target) return;
+			event.preventDefault();
+
+			if (target.matches(":popover-open")) {
+				target.hidePopover();
+				return;
+			}
+
+			// a panel taking another one's place appears in place instead of sliding up again
+			setSkipAnimation(activePanel !== null);
+			setActivePanel(panel);
+			target.showPopover({ source: event.currentTarget });
+		};
 
 	return (
 		<div
@@ -191,7 +217,7 @@ export function MobileNav({ sidebarData }: { sidebarData: SidebarData }) {
 			<MobileTabBar
 				panelIds={panelIds}
 				activePanel={activePanel}
-				onBeforeToggle={rememberOpenPanel}
+				onTabClick={onTabClick}
 				isLoggedIn={Boolean(user)}
 				hasUnseenNotifications={showUnseenDot}
 				hasFriendInSendouQ={hasFriendInSendouQ}
@@ -204,7 +230,7 @@ export function MobileNav({ sidebarData }: { sidebarData: SidebarData }) {
 function MobileTabBar({
 	panelIds,
 	activePanel,
-	onBeforeToggle,
+	onTabClick,
 	isLoggedIn,
 	hasUnseenNotifications,
 	hasFriendInSendouQ,
@@ -212,7 +238,7 @@ function MobileTabBar({
 }: {
 	panelIds: PanelIds;
 	activePanel: PanelType | null;
-	onBeforeToggle: () => void;
+	onTabClick: (panel: PanelType) => TabClickHandler;
 	isLoggedIn: boolean;
 	hasUnseenNotifications: boolean;
 	hasFriendInSendouQ: boolean;
@@ -220,15 +246,27 @@ function MobileTabBar({
 }) {
 	const { t } = useTranslation(["front", "common"]);
 	const chatContext = useChatContext();
+	const isHydrated = useHydrated();
+	const tabProps = (
+		panel: PanelType,
+		{ worksBeforeHydration = false } = {},
+	) => ({
+		popoverTarget:
+			activePanel !== null
+				? panelIds[activePanel]
+				: isHydrated || worksBeforeHydration
+					? panelIds[panel]
+					: undefined,
+		isActive: activePanel === panel,
+		onClick: onTabClick(panel),
+	});
 
 	return (
 		<nav className={styles.tabBar}>
 			<MobileTab
 				icon={<Menu />}
 				label={t("front:mobileNav.menu")}
-				panelId={panelIds.menu}
-				isActive={activePanel === "menu"}
-				onBeforeToggle={onBeforeToggle}
+				{...tabProps("menu", { worksBeforeHydration: true })}
 			/>
 
 			{isLoggedIn ? (
@@ -236,9 +274,7 @@ function MobileTabBar({
 					<MobileTab
 						icon={<Users />}
 						label={t("front:mobileNav.friends")}
-						panelId={panelIds.friends}
-						isActive={activePanel === "friends"}
-						onBeforeToggle={onBeforeToggle}
+						{...tabProps("friends")}
 						showNotificationDot={hasFriendInSendouQ}
 						badgeCount={unseenFriendRequests}
 						badgeLeft={hasFriendInSendouQ}
@@ -246,24 +282,18 @@ function MobileTabBar({
 					<MobileTab
 						icon={<Calendar />}
 						label={t("front:sideNav.myCalendar")}
-						panelId={panelIds.tourneys}
-						isActive={activePanel === "tourneys"}
-						onBeforeToggle={onBeforeToggle}
+						{...tabProps("tourneys")}
 					/>
 					<MobileTab
 						icon={<MessageSquare />}
 						label={t("front:mobileNav.chat")}
-						panelId={panelIds.chat}
-						isActive={activePanel === "chat"}
-						onBeforeToggle={onBeforeToggle}
+						{...tabProps("chat", { worksBeforeHydration: true })}
 						unreadCount={chatContext?.totalUnreadCount}
 					/>
 					<MobileTab
 						icon={<User />}
 						label={t("front:mobileNav.you")}
-						panelId={panelIds.you}
-						isActive={activePanel === "you"}
-						onBeforeToggle={onBeforeToggle}
+						{...tabProps("you")}
 						showNotificationDot={hasUnseenNotifications}
 					/>
 				</>
@@ -284,9 +314,9 @@ function MobileTabBar({
 function MobileTab({
 	icon,
 	label,
-	panelId,
+	popoverTarget,
 	isActive,
-	onBeforeToggle,
+	onClick,
 	showNotificationDot,
 	unreadCount,
 	badgeCount,
@@ -294,9 +324,9 @@ function MobileTab({
 }: {
 	icon: React.ReactNode;
 	label: string;
-	panelId: string;
+	popoverTarget?: string;
 	isActive: boolean;
-	onBeforeToggle: () => void;
+	onClick: TabClickHandler;
 	showNotificationDot?: boolean;
 	unreadCount?: number;
 	badgeCount?: number;
@@ -309,11 +339,8 @@ function MobileTab({
 			type="button"
 			className={styles.tab}
 			data-active={isActive}
-			popoverTarget={panelId}
-			onPointerDown={onBeforeToggle}
-			onKeyDown={(event) => {
-				if (event.key === "Enter" || event.key === " ") onBeforeToggle();
-			}}
+			popoverTarget={popoverTarget}
+			onClick={onClick}
 		>
 			<span className={styles.tabIcon}>
 				{icon}
@@ -330,62 +357,6 @@ function MobileTab({
 			</span>
 			<span>{label}</span>
 		</button>
-	);
-}
-
-function PanelCloseButton({ panelId }: { panelId: string }) {
-	const { t } = useTranslation(["common"]);
-
-	return (
-		<button
-			type="button"
-			className={styles.panelCloseButton}
-			popoverTarget={panelId}
-			popoverTargetAction="hide"
-			aria-label={t("common:actions.close")}
-		>
-			<X size={18} />
-		</button>
-	);
-}
-
-function MobilePanel({
-	id,
-	title,
-	icon,
-	children,
-	skipAnimation,
-	onToggle,
-}: {
-	id: string;
-	title: string;
-	icon: React.ReactNode;
-	children: React.ReactNode;
-	skipAnimation: boolean;
-	onToggle: PanelToggleHandler;
-}) {
-	const titleId = `${id}-title`;
-
-	return (
-		<div
-			id={id}
-			popover="auto"
-			role="dialog"
-			aria-labelledby={titleId}
-			className={clsx(styles.panel, skipAnimation && styles.noAnimation)}
-			onToggle={onToggle}
-		>
-			<div className={styles.panelDialog}>
-				<header className={styles.panelHeader}>
-					<div className={styles.panelIconContainer}>{icon}</div>
-					<h2 id={titleId} className={styles.panelTitle}>
-						{title}
-					</h2>
-					<PanelCloseButton panelId={id} />
-				</header>
-				<div className={clsx(styles.panelContent, "scrollbar")}>{children}</div>
-			</div>
-		</div>
 	);
 }
 
@@ -444,7 +415,7 @@ function MenuPanel({
 							shape="square"
 							url={`${SENDOU_INK_BASE_URL}${location.pathname}${location.search}`}
 						/>
-						<PanelCloseButton panelId={id} />
+						<SendouBottomSheetCloseButton sheetId={id} />
 					</div>
 				</header>
 
@@ -511,7 +482,7 @@ function FriendsPanel({
 	const { t } = useTranslation(["front", "common"]);
 
 	return (
-		<MobilePanel
+		<SendouBottomSheet
 			id={id}
 			title={t("front:sideNav.friends")}
 			icon={<Users size={18} />}
@@ -525,11 +496,15 @@ function FriendsPanel({
 					{t("front:sideNav.friends.noFriends")}
 				</div>
 			)}
-			<Link to={FRIENDS_PAGE} className={styles.panelSectionLink}>
+			<Link
+				to={FRIENDS_PAGE}
+				prefetch="intent"
+				className={styles.panelSectionLink}
+			>
 				{t("common:actions.viewAll")}
 				<ChevronRight size={14} />
 			</Link>
-		</MobilePanel>
+		</SendouBottomSheet>
 	);
 }
 
@@ -549,7 +524,7 @@ function TourneysPanel({
 	const { t } = useTranslation(["front", "common"]);
 
 	return (
-		<MobilePanel
+		<SendouBottomSheet
 			id={id}
 			title={t("front:sideNav.myCalendar")}
 			icon={<Calendar size={18} />}
@@ -558,11 +533,15 @@ function TourneysPanel({
 		>
 			{showScheduleNudge ? <ScheduleNudge panel /> : null}
 			<EventsList events={events} />
-			<Link to={EVENTS_PAGE} className={styles.panelSectionLink}>
+			<Link
+				to={EVENTS_PAGE}
+				prefetch="intent"
+				className={styles.panelSectionLink}
+			>
 				{t("common:actions.viewAll")}
 				<ChevronRight size={14} />
 			</Link>
-		</MobilePanel>
+		</SendouBottomSheet>
 	);
 }
 
@@ -580,13 +559,14 @@ function YouPanel({
 	const { t } = useTranslation(["front", "common"]);
 	const user = useUser();
 	const { notifications, unseenIds } = useNotifications();
+	useMarkNotificationsSeenWhileOpen(unseenIds, isOpen);
 
 	if (!user) {
 		return null;
 	}
 
 	return (
-		<MobilePanel
+		<SendouBottomSheet
 			id={id}
 			title={t("front:mobileNav.you")}
 			icon={<User size={18} />}
@@ -594,13 +574,18 @@ function YouPanel({
 			onToggle={onToggle}
 		>
 			<div className={styles.youPanelUserRow}>
-				<Link to={userPage(user)} className={styles.youPanelUser}>
+				<Link
+					to={userPage(user)}
+					prefetch="intent"
+					className={styles.youPanelUser}
+				>
 					<Avatar user={user} size="sm" />
 					<span className={styles.youPanelUsername}>{user.username}</span>
 				</Link>
 				{user.team ? (
 					<Link
 						to={teamPage(user.team.customUrl)}
+						prefetch="intent"
 						className={styles.youPanelSettingsButton}
 						aria-label={t("common:header.myTeam")}
 					>
@@ -619,6 +604,7 @@ function YouPanel({
 				) : null}
 				<Link
 					to={SETTINGS_PAGE}
+					prefetch="intent"
 					className={styles.youPanelSettingsButton}
 					aria-label={t("common:pages.settings")}
 				>
@@ -626,12 +612,8 @@ function YouPanel({
 				</Link>
 			</div>
 
-			<NotificationContent
-				notifications={notifications}
-				unseenIds={unseenIds}
-				isOpen={isOpen}
-			/>
-		</MobilePanel>
+			<NotificationContent notifications={notifications} isOpen={isOpen} />
+		</SendouBottomSheet>
 	);
 }
 

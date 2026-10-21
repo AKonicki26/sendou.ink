@@ -11,11 +11,13 @@ import * as R from "remeda";
 import { db } from "~/db/sql";
 import type { DB, DBBoolean, Tables } from "~/db/tables";
 import type {
+	CastAccount,
 	CastedMatchesInfo,
 	PreparedMaps,
 	TournamentSettings,
 } from "~/db/tables-json";
 import { actorId } from "~/features/auth/core/user.server";
+import type { StreamAccount } from "~/features/live-streams/live-streams-constants";
 import { identifierToUserIds } from "~/features/mmr/mmr-utils";
 import { organizerPermissions } from "~/features/tournament/core/permissions";
 import * as Progression from "~/features/tournament-bracket/core/Progression";
@@ -35,6 +37,8 @@ import {
 	calendarEventStartTime,
 	commonUserSelect,
 	concatUserSubmittedImagePrefix,
+	isCastLiveStreamOf,
+	isLiveStreamOf,
 	jsonArrayFrom,
 	jsonObjectFrom,
 	tournamentLogoWithDefault,
@@ -63,7 +67,7 @@ export async function findById(id: number) {
 			"CalendarEvent.discordUrl",
 			"CalendarEvent.tags",
 			"Tournament.settings",
-			"Tournament.castTwitchAccounts",
+			"Tournament.castAccounts",
 			"Tournament.castedMatchesInfo",
 			"Tournament.mapPickingStyle",
 			sql<boolean>`"Tournament"."rules" is not null`.as("hasRules"),
@@ -393,28 +397,26 @@ function latestTeamIdByDuplicatedUserId(
 	return result;
 }
 
-/** Live streams of checked-in participants and of the tournament's cast Twitch accounts. */
+/** Live streams of checked-in participants and of the tournament's cast accounts. */
 export async function findStreamsByTournamentId(tournamentId: number) {
 	const [participantStreams, castStreams] = await Promise.all([
 		db
-			.selectFrom("LiveStream")
-			.innerJoin("User", "User.twitch", "LiveStream.twitch")
+			.selectFrom("TournamentTeam")
 			.innerJoin(
 				"TournamentTeamMember",
-				"TournamentTeamMember.userId",
-				"User.id",
-			)
-			.innerJoin(
-				"TournamentTeam",
-				"TournamentTeam.id",
 				"TournamentTeamMember.tournamentTeamId",
+				"TournamentTeam.id",
 			)
+			.innerJoin("User", "User.id", "TournamentTeamMember.userId")
+			.innerJoin("LiveStream", (join) => join.on(isLiveStreamOf()))
 			.select((eb) => [
 				"User.id as userId",
-				"LiveStream.twitch",
+				"LiveStream.platform",
+				"LiveStream.account",
+				"LiveStream.videoId",
 				"LiveStream.viewerCount",
 				"LiveStream.thumbnailUrl",
-				"TournamentTeam.name as teamName",
+				"TournamentTeam.id as teamId",
 				...commonUserSelect(eb, { inTournament: true }),
 			])
 			.where("TournamentTeam.tournamentId", "=", tournamentId)
@@ -430,18 +432,21 @@ export async function findStreamsByTournamentId(tournamentId: number) {
 						),
 				),
 			)
-			.groupBy("LiveStream.twitch")
-			.$narrowType<{ twitch: NotNull }>()
+			.groupBy("LiveStream.id")
 			.execute(),
 		db
 			.selectFrom("LiveStream")
 			.select([
-				"LiveStream.twitch",
+				"LiveStream.platform",
+				"LiveStream.account",
+				"LiveStream.videoId",
 				"LiveStream.viewerCount",
 				"LiveStream.thumbnailUrl",
 			])
 			.where(
-				sql<boolean>`"LiveStream"."twitch" IN (SELECT value FROM json_each((SELECT "castTwitchAccounts" FROM "Tournament" WHERE "Tournament"."id" = ${tournamentId})))`,
+				isCastLiveStreamOf(
+					sql`(select "castAccounts" from "Tournament" where "Tournament"."id" = ${tournamentId})`,
+				),
 			)
 			.execute(),
 	]);
@@ -449,28 +454,37 @@ export async function findStreamsByTournamentId(tournamentId: number) {
 	return { participantStreams, castStreams };
 }
 
-/** User ids of everyone who played at least one map of the tournament. */
+/**
+ * User ids of everyone who played at least one map of the tournament. Probes each roster member
+ * instead of reading every participant row (members who played can't be removed from the roster).
+ */
 export async function findParticipatedUserIdsById(tournamentId: number) {
 	const rows = await db
-		.selectFrom("TournamentStage")
+		.selectFrom("TournamentTeam")
 		.innerJoin(
-			"TournamentMatch",
-			"TournamentMatch.stageId",
-			"TournamentStage.id",
+			"TournamentTeamMember",
+			"TournamentTeamMember.tournamentTeamId",
+			"TournamentTeam.id",
 		)
-		.innerJoin(
-			"TournamentMatchGameResult",
-			"TournamentMatch.id",
-			"TournamentMatchGameResult.matchId",
+		.select("TournamentTeamMember.userId")
+		.distinct()
+		.where("TournamentTeam.tournamentId", "=", tournamentId)
+		.where(({ exists, selectFrom }) =>
+			exists(
+				selectFrom("TournamentMatchGameResultParticipant")
+					.select("TournamentMatchGameResultParticipant.userId")
+					.whereRef(
+						"TournamentMatchGameResultParticipant.tournamentTeamId",
+						"=",
+						"TournamentTeam.id",
+					)
+					.whereRef(
+						"TournamentMatchGameResultParticipant.userId",
+						"=",
+						"TournamentTeamMember.userId",
+					),
+			),
 		)
-		.innerJoin(
-			"TournamentMatchGameResultParticipant",
-			"TournamentMatchGameResult.id",
-			"TournamentMatchGameResultParticipant.matchGameResultId",
-		)
-		.select("TournamentMatchGameResultParticipant.userId")
-		.groupBy("TournamentMatchGameResultParticipant.userId")
-		.where("TournamentStage.tournamentId", "=", tournamentId)
 		.execute();
 
 	return rows.map((row) => row.userId);
@@ -598,13 +612,13 @@ export async function findTeamsFullByTournamentId(tournamentId: number) {
 }
 
 /**
- * Twitch accounts of the given tournaments' participants who have not dropped out.
+ * Twitch and YouTube accounts of the given tournaments' participants who have not dropped out.
  * Kept out of {@link findById} since only the live stream sync routine needs them.
  */
-export async function findParticipantTwitchAccounts(tournamentIds: number[]) {
+export async function findParticipantStreamAccounts(tournamentIds: number[]) {
 	if (tournamentIds.length === 0) return [];
 
-	return db
+	const rows = await db
 		.selectFrom("TournamentTeamMember")
 		.innerJoin(
 			"TournamentTeam",
@@ -616,13 +630,27 @@ export async function findParticipantTwitchAccounts(tournamentIds: number[]) {
 			"TournamentTeam.tournamentId",
 			"TournamentTeamMember.userId",
 			"User.twitch",
+			"User.youtubeId",
 		])
 		.where("TournamentTeam.tournamentId", "in", tournamentIds)
 		.where("TournamentTeam.isPlaceholder", "=", 0)
 		.where("TournamentTeam.droppedOut", "=", 0)
-		.where("User.twitch", "is not", null)
-		.$narrowType<{ twitch: NotNull }>()
+		.where((eb) =>
+			eb.or([
+				eb("User.twitch", "is not", null),
+				eb("User.youtubeId", "is not", null),
+			]),
+		)
 		.execute();
+
+	return rows.map((row) => ({
+		tournamentId: row.tournamentId,
+		userId: row.userId,
+		streamAccounts: [
+			row.twitch ? { platform: "TWITCH", account: row.twitch } : null,
+			row.youtubeId ? { platform: "YOUTUBE", account: row.youtubeId } : null,
+		].filter((account): account is StreamAccount => account !== null),
+	}));
 }
 
 /**
@@ -876,6 +904,7 @@ export function findAllForShowcase() {
 						...commonUserSelect(placerEb, { inTournament: true }),
 						"User.country",
 						"TournamentResult.div",
+						"TournamentTeam.id as tournamentTeamId",
 						"TournamentTeam.name as teamName",
 						concatUserSubmittedImagePrefix(placerEb.ref("TeamAvatar.url")).as(
 							"teamLogoUrl",
@@ -1306,22 +1335,16 @@ export function upsertPreparedMaps({
 	});
 }
 
-export function updateCastTwitchAccounts({
+export function updateCastAccounts({
 	tournamentId,
-	castTwitchAccounts,
+	castAccounts,
 }: {
 	tournamentId: number;
-	castTwitchAccounts: string[];
+	castAccounts: CastAccount[];
 }) {
 	return db
 		.updateTable("Tournament")
-		.set({
-			castTwitchAccounts: JSON.stringify(
-				castTwitchAccounts
-					.map((account) => account.trim().toLowerCase())
-					.filter(Boolean),
-			),
-		})
+		.set({ castAccounts: JSON.stringify(castAccounts) })
 		.where("id", "=", tournamentId)
 		.execute();
 }
@@ -1345,11 +1368,11 @@ const castedMatchesInfoByTournamentId = async (
 export function lockMatch({
 	matchId,
 	tournamentId,
-	twitchAccount,
+	castAccount,
 }: {
 	matchId: number;
 	tournamentId: number;
-	twitchAccount: string;
+	castAccount: StreamAccount;
 }) {
 	return db.transaction().execute(async (trx) => {
 		const castedMatchesInfo = await castedMatchesInfoByTournamentId(
@@ -1358,7 +1381,11 @@ export function lockMatch({
 		);
 
 		if (!castedMatchesInfo.lockedMatches.some((lm) => lm.matchId === matchId)) {
-			castedMatchesInfo.lockedMatches.push({ matchId, twitchAccount });
+			castedMatchesInfo.lockedMatches.push({
+				matchId,
+				platform: castAccount.platform,
+				account: castAccount.account,
+			});
 		}
 
 		await trx
@@ -1412,11 +1439,11 @@ export function unlockMatch({
 export function setMatchAsCasted({
 	matchId,
 	tournamentId,
-	twitchAccount,
+	castAccount,
 }: {
 	matchId: number;
 	tournamentId: number;
-	twitchAccount: string | null;
+	castAccount: StreamAccount | null;
 }) {
 	return db.transaction().execute(async (trx) => {
 		const castedMatchesInfo = await castedMatchesInfoByTournamentId(
@@ -1426,7 +1453,7 @@ export function setMatchAsCasted({
 
 		const newCastedMatchesInfo = updatedCastedMatchesInfo(castedMatchesInfo, {
 			matchId,
-			twitchAccount,
+			castAccount,
 			timestamp: databaseTimestampNow(),
 		});
 
@@ -1678,17 +1705,24 @@ export function finalize({
 		await trx.insertInto("TournamentBadgeOwner").values(badgeOwners).execute();
 
 		if (trophyReceiver) {
+			const receiverIdsByTeamId = new Map<number | undefined, number[]>();
+			for (const userId of trophyReceiver.userIds) {
+				const tournamentTeamId = summary.tournamentResults.find(
+					(result) => result.userId === userId,
+				)?.tournamentTeamId;
+				receiverIdsByTeamId.set(tournamentTeamId, [
+					...(receiverIdsByTeamId.get(tournamentTeamId) ?? []),
+					userId,
+				]);
+			}
+
 			await TrophyRepository.insertTournamentOwners(
-				[
-					{
-						tournamentId,
-						tournamentTeamId: summary.tournamentResults.find((result) =>
-							trophyReceiver.userIds.includes(result.userId),
-						)?.tournamentTeamId,
-						trophyId: trophyReceiver.trophyId,
-						userIds: trophyReceiver.userIds,
-					},
-				],
+				Array.from(receiverIdsByTeamId, ([tournamentTeamId, userIds]) => ({
+					tournamentId,
+					tournamentTeamId,
+					trophyId: trophyReceiver.trophyId,
+					userIds,
+				})),
 				trx,
 			);
 		}

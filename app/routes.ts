@@ -258,6 +258,13 @@ export default [
 	route("/faq", "features/info/routes/faq.tsx"),
 	route("/welcome", "features/info/routes/welcome.tsx"),
 	route("/contributions", "features/info/routes/contributions.tsx"),
+
+	route("/translate", "features/translate/routes/translate.tsx"),
+	route(
+		"/translate/:language",
+		"features/translate/routes/translate.$language.tsx",
+		[index("features/translate/routes/translate.$language.index.tsx")],
+	),
 	route("/support", "features/info/routes/support.tsx"),
 
 	route("/t/new", "features/team/routes/t.new.tsx"),
@@ -343,6 +350,7 @@ export default [
 
 	route("/admin", "features/admin/routes/admin.tsx"),
 	route("/admin/streams", "features/admin/routes/admin.streams.tsx"),
+	route("/admin/voice", "features/voice/routes/admin.voice.tsx"),
 	route("/api/chat/rooms", "features/chat/routes/api.chat.rooms.ts"),
 	route("/api/chat/rooms/:id", "features/chat/routes/api.chat.rooms.$id.ts"),
 	route(
@@ -357,6 +365,9 @@ export default [
 		"/api/chat/rooms/:id/mentions/seen",
 		"features/chat/routes/api.chat.rooms.$id.mentions.seen.ts",
 	),
+	route("/api/voice/rooms/:id", "features/voice/routes/api.voice.rooms.$id.ts"),
+	route("/api/voice/telemetry", "features/voice/routes/api.voice.telemetry.ts"),
+	route("/api/voice/webhook", "features/voice/routes/api.voice.webhook.ts"),
 	route("/api/layout", "features/layout/routes/api.layout.ts"),
 	route(
 		"/api/notifications",

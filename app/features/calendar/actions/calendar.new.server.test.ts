@@ -10,11 +10,11 @@ import { MapPool } from "~/features/map-list-generator/core/map-pool";
 import { tournamentFromDB } from "~/features/tournament-bracket/core/Tournament.server";
 import { invariant } from "~/utils/invariant";
 import { wrappedAction } from "~/utils/Test";
-import type { calendarNewSchemaServer } from "../calendar-new-schemas.server";
+import type { calendarNewSchema } from "../calendar-new-schemas";
 import { calendarNewFormValues } from "../tests/fixtures";
 import { action } from "./calendar.new.server";
 
-const editAction = wrappedAction<typeof calendarNewSchemaServer>({
+const editAction = wrappedAction<typeof calendarNewSchema>({
 	action,
 	isJsonSubmission: true,
 });
@@ -247,5 +247,43 @@ describe("calendar new action: team picked tournament", () => {
 		const edited = await tournamentFromDB(tournament.id);
 		expect(edited.ctx.teams[0].hasMapPool).toBe(0);
 		expect(edited.ctx.teams[0].checkIns).toEqual([]);
+	});
+});
+
+describe("calendar new action: organization the user no longer organizes in", () => {
+	const orgOwnerId = () => users.id(1);
+	const demotedAuthorId = () => users.id(2);
+
+	beforeEach(async () => {
+		await users.create(2);
+	});
+
+	test("author demoted to a member can still edit their tournament", async () => {
+		const org = await TournamentOrganizationFactory.create(
+			{ ownerId: orgOwnerId() },
+			{
+				isEstablished: true,
+				members: [{ userId: demotedAuthorId(), role: "MEMBER" }],
+			},
+		);
+		const tournament = await TournamentFactory.create({
+			authorId: demotedAuthorId(),
+			organizationId: org.id,
+			name: "Low Ink",
+		});
+
+		await editAction(
+			calendarNewFormValues({
+				eventToEditId: tournament.eventId,
+				name: "Low Ink (edited)",
+				organizationId: String(org.id),
+				bracketUrl: "https://sendou.ink",
+			}),
+			{ user: demotedAuthorId() },
+		);
+
+		expect((await CalendarRepository.findById(tournament.eventId))?.name).toBe(
+			"Low Ink (edited)",
+		);
 	});
 });

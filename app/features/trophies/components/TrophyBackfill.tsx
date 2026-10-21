@@ -1,6 +1,8 @@
+import clsx from "clsx";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { useFetcher } from "react-router";
+import * as R from "remeda";
 import { ActionButton } from "~/components/ActionButton";
 import { Alert } from "~/components/Alert";
 import { Avatar } from "~/components/Avatar";
@@ -165,10 +167,9 @@ function BackfillTournamentList({
 		tournament.winners.map((winner) => winner.id);
 
 	const toggleTournament = (tournament: BackfillTournament) => {
-		const { [tournament.tournamentId]: existing, ...rest } = awards;
 		setAwards(
-			existing
-				? rest
+			awards[tournament.tournamentId]
+				? R.omit(awards, [tournament.tournamentId])
 				: { ...awards, [tournament.tournamentId]: allWinners(tournament) },
 		);
 	};
@@ -264,7 +265,9 @@ function BackfillTournamentList({
 											aria-label={winner.username}
 										/>
 										<Avatar user={winner} size="xxs" />
-										<span className={styles.winnerName}>{winner.username}</span>
+										<span className={clsx(styles.winnerName, "truncate")}>
+											{winner.username}
+										</span>
 										<ParticipationPill setResults={winner.setResults} />
 									</li>
 								))}

@@ -12,6 +12,7 @@ import type {
 	Selectable,
 } from "kysely";
 import type {
+	CastAccount,
 	CastedMatchesInfo,
 	CustomTheme,
 	NotificationSubscription,
@@ -35,6 +36,7 @@ import type {
 	PersistedSystemMessageType,
 } from "~/features/chat/chat-types";
 import type { LFGType } from "~/features/lfg/lfg-constants";
+import type { StreamPlatform } from "~/features/live-streams/live-streams-constants";
 import type { TierName } from "~/features/mmr/mmr-constants";
 import type { SkillTeamIdentifier } from "~/features/mmr/mmr-utils";
 import type { Notification as NotificationValue } from "~/features/notifications/notifications-types";
@@ -64,6 +66,13 @@ import type { StoredWidget } from "~/features/user-page/core/widgets/types";
 import type { BuildSort } from "~/features/user-page/user-page-constants";
 import type { UserReportCategory } from "~/features/user-report/user-report-constants";
 import type { videoMatchTypes } from "~/features/vods/vods-constants";
+import type {
+	VoiceClientErrorKind,
+	VoiceInputMode,
+	VoiceLeaveReason,
+	VoiceNetworkQualityState,
+	VoicePlatform,
+} from "~/features/voice/voice-constants";
 import type { UnifiedLanguageCode } from "~/modules/i18n/config";
 import type {
 	Ability,
@@ -240,10 +249,12 @@ export interface BuildWeapon {
 	weaponSplId: MainWeaponId;
 	/** Alt skins collapse to their base weapon (e.g. Hero Shot Replica `45` → Splattershot `40`). Indexed for the builds-by-weapon, popular, and stats queries so they can filter `= ?` against a covering index instead of `IN (alt skins…)`. */
 	canonicalWeaponSplId: MainWeaponId;
-	/** Mirror of `Build.updatedAt`. Denormalized so the `(canonicalWeaponSplId, sortValue, updatedAt, buildId)` covering index serves the builds-by-weapon list. */
+	/** Mirror of `Build.updatedAt`. Denormalized so the `(canonicalWeaponSplId, sortValue, updatedAt, buildId, ownerId)` covering index serves the builds-by-weapon list. */
 	updatedAt: Generated<number>;
 	/** Per-weapon sort priority: `plusTier * 2 + (this weapon is top500 ? 0 : 1)` for public builds, NULL for private. */
 	sortValue: number | null;
+	/** Mirror of `Build.ownerId`. Denormalized so the builds-by-weapon list pages by author off covering indexes. */
+	ownerId: number;
 }
 
 /** Per-build ability point sums across all gear slots. Used to compute global `findAllAbilityPointAverages`. */
@@ -651,7 +662,7 @@ export interface Tournament {
 	mapPickingStyle: TournamentMapPickingStyle;
 	/** Maps prepared ahead of time for rounds. Follows settings.bracketProgression order. Null in the spot if not defined yet for that bracket. */
 	preparedMaps: JSONColumnTypeNullable<(PreparedMaps | null)[]>;
-	castTwitchAccounts: JSONColumnTypeNullable<string[]>;
+	castAccounts: JSONColumnTypeNullable<CastAccount[]>;
 	castedMatchesInfo: JSONColumnTypeNullable<CastedMatchesInfo>;
 	rules: string | null;
 	/** Is the tournament finalized meaning all the matches are played and TO has locked it making it read-only */
@@ -1018,7 +1029,7 @@ export interface User {
 	patronExpiresAt: number | null;
 	twitch: string | null;
 	bsky: string | null;
-	vc: Generated<"YES" | "NO" | "LISTEN_ONLY">;
+	vc: Generated<UserVoiceChat>;
 	youtubeId: string | null;
 	youtubeName: string | null;
 	mapModePreferences: JSONColumnTypeNullable<UserMapModePreferences>;
@@ -1103,19 +1114,27 @@ export interface ApiToken {
 	createdAt: Generated<number>;
 }
 
+/** Splatoon 3 stream live right now, replaced wholesale on every sync. */
 export interface LiveStream {
 	id: GeneratedAlways<number>;
+	platform: StreamPlatform;
+	/** Twitch login or YouTube channel id */
+	account: string;
+	/** Id of the live video, `null` on Twitch where the channel is the stream. */
+	videoId: string | null;
+	/** User whose Twitch/YouTube connection the account is. */
 	userId: number | null;
 	viewerCount: number;
 	thumbnailUrl: string;
-	twitch: string | null;
 }
 
+/** Account seen streaming the tournament while it was running, used to find match VoDs afterwards. */
 export interface TournamentStreamer {
 	id: GeneratedAlways<number>;
 	userId: number | null;
 	tournamentId: number;
-	twitchAccount: string;
+	platform: StreamPlatform;
+	account: string;
 }
 
 export interface ExternalStream {
@@ -1131,7 +1150,7 @@ export interface TournamentMatchVod {
 	id: GeneratedAlways<number>;
 	matchId: number;
 	userId: number | null;
-	platform: "TWITCH";
+	platform: StreamPlatform;
 	account: string;
 	platformVideoId: string;
 	timestampSeconds: number;
@@ -1194,6 +1213,60 @@ export interface VideoMatchPlayer {
 	playerUserId: number | null;
 	videoMatchId: number;
 	weaponSplId: number;
+}
+
+export type UserVoiceChat = "YES" | "NO" | "LISTEN_ONLY";
+
+export interface VoiceSession {
+	id: GeneratedAlways<number>;
+	/** `null` once the chat room has been deleted. The session stays for the statistics. */
+	roomId: number | null;
+	roomType: ChatRoomType;
+	userId: number;
+	platform: VoicePlatform;
+	/** Members of the room who could have joined voice when this session started based on voice chat settings. We need these to check for adoption. */
+	eligibleMemberCount: number;
+	/** The joiner's own voice chat setting ({@link User.vc}) when they joined. */
+	vcPreference: UserVoiceChat;
+	dailySessionId: string | null;
+	createdAt: Generated<number>;
+	connectedAt: number | null;
+	leftAt: number | null;
+	/** Billed seconds in the call as reported by Daily, `null` until its webhook connects. */
+	durationSeconds: number | null;
+	leaveReason: VoiceLeaveReason | null;
+	networkQualityState: VoiceNetworkQualityState | null;
+	lowQualitySeconds: Generated<number>;
+	talkSeconds: Generated<number>;
+	inputMode: VoiceInputMode | null;
+}
+
+export interface VoiceClientError {
+	id: GeneratedAlways<number>;
+	voiceSessionId: number | null;
+	userId: number;
+	kind: VoiceClientErrorKind;
+	detail: string | null;
+	platform: VoicePlatform;
+	createdAt: Generated<number>;
+}
+
+export interface VoiceFeedback {
+	id: GeneratedAlways<number>;
+	voiceSessionId: number;
+	userId: number;
+	/** 1-5 */
+	rating: number;
+	comment: string | null;
+	createdAt: Generated<number>;
+}
+
+export interface VoiceSettings {
+	id: GeneratedAlways<number>;
+	/** Manual kill switch. */
+	isDisabled: Generated<DBBoolean>;
+	updatedAt: number | null;
+	updatedByUserId: number | null;
 }
 
 export interface XRankPlacement {
@@ -1516,6 +1589,10 @@ export interface DB {
 	Video: Video;
 	VideoMatch: VideoMatch;
 	VideoMatchPlayer: VideoMatchPlayer;
+	VoiceClientError: VoiceClientError;
+	VoiceFeedback: VoiceFeedback;
+	VoiceSession: VoiceSession;
+	VoiceSettings: VoiceSettings;
 	XRankPlacement: XRankPlacement;
 	ScrimPost: ScrimPost;
 	ScrimPostUser: ScrimPostUser;

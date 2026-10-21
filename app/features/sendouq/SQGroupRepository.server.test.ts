@@ -212,6 +212,29 @@ describe("insert", () => {
 		expect(result.chatRoomIdToRevalidate).toBeNull();
 	});
 
+	test("leaves a passed vote alone when a member who voted yes leaves the successor group and queues again", async () => {
+		const { alphaGroupId, alphaMembers } = await setupConcludedMatch();
+
+		for (const member of alphaMembers) {
+			await castYesVote(member.id, alphaGroupId);
+		}
+		await SQGroupRepository.insertFromPrevious({
+			previousGroupId: alphaGroupId,
+			memberUserIds: alphaMembers.map((member) => member.id),
+			status: "ACTIVE",
+		});
+		const votesBefore = await fetchVotes(alphaGroupId);
+
+		await SQGroupRepository.leaveGroup(alphaMembers[0].id);
+		const result = await SQGroupRepository.insert({
+			status: "ACTIVE",
+			userId: alphaMembers[0].id,
+		});
+
+		expect(await fetchVotes(alphaGroupId)).toEqual(votesBefore);
+		expect(result.chatRoomIdToRevalidate).toBeNull();
+	});
+
 	test("does not record any vote when user has no previous matchmade group", async () => {
 		const user = await UserFactory.create();
 
@@ -399,7 +422,7 @@ describe("insertFromPrevious", () => {
 });
 
 describe("morphGroups", () => {
-	test("gives the survivor a fresh chat room and deletes both old rooms", async () => {
+	test("the survivor keeps its chat room and the other group's room is deleted", async () => {
 		const [userOne, userTwo] = await UserFactory.createMany(2);
 		const survivingGroup = await SQGroupFactory.create({
 			memberUserIds: [userOne.id],
@@ -414,11 +437,10 @@ describe("morphGroups", () => {
 			otherGroupId: otherGroup.id,
 		});
 
-		const survivorChatRoomId = await groupChatRoomId(survivingGroup.id);
-		expect(survivorChatRoomId).not.toBe(oldChatRoomId);
+		expect(await groupChatRoomId(survivingGroup.id)).toBe(oldChatRoomId);
 
 		const rooms = await allChatRooms();
-		expect(rooms.map((room) => room.id)).toEqual([survivorChatRoomId]);
+		expect(rooms.map((room) => room.id)).toEqual([oldChatRoomId]);
 	});
 });
 

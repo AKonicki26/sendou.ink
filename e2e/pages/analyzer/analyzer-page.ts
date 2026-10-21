@@ -36,6 +36,11 @@ export class AnalyzerPage {
 		return this.locators.abilitySelector.getByTestId(`${ability}-ability`);
 	}
 
+	/** Effects are labeled by their display name e.g. "Drop Roller" */
+	effectSwitch(name: string) {
+		return this.page.getByRole("switch", { name, exact: true });
+	}
+
 	apComparison(buildNumber: 1 | 2) {
 		return this.page.getByTestId(`ap-compare-${buildNumber}`);
 	}
@@ -43,7 +48,7 @@ export class AnalyzerPage {
 	/** Picks a weapon from the landing shown when no weapon is selected yet */
 	async pickWeapon(name: string) {
 		const { weaponLanding } = this.locators;
-		await weaponLanding.getByRole("textbox").fill(name);
+		await weaponLanding.getByRole("searchbox").fill(name);
 		await weaponLanding.getByText(name, { exact: true }).click();
 	}
 
@@ -62,6 +67,10 @@ export class AnalyzerPage {
 
 	async addAbility(ability: Ability) {
 		await this.page.getByTestId(`${ability}-ability-button`).click();
+	}
+
+	async toggleEffect(name: string) {
+		await this.effectSwitch(name).click({ force: true });
 	}
 
 	async openNewBuildPrompt() {

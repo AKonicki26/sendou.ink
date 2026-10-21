@@ -22,12 +22,10 @@ export function TournamentMatchHeader({
 					to={tournamentBracketsPage({
 						tournamentId: tournament.ctx.id,
 						bracketIdx: data.bracketContext.bracketIdx,
-						groupId:
-							data.bracketContext.bracketType === "swiss"
-								? data.match.groupId
-								: undefined,
+						groupId: data.bracketContext.bracketsPageGroupId ?? undefined,
 					})}
 					state={{ scrollToMatchId: data.match.id } satisfies BracketsPageState}
+					preventScrollReset
 					data-testid="back-to-bracket-button"
 				/>
 			}

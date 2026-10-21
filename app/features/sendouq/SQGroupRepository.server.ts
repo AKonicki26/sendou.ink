@@ -383,18 +383,30 @@ export function morphGroups({
 			.where("Group.id", "=", survivingGroupId)
 			.executeTakeFirst();
 
-		// fresh chat room so neither group's previous messages are visible, and
-		// mark as matchmade
-		const chatRoom = await ChatRepository.insertRoom(
-			{
-				type: "SQ_GROUP",
-				expiresAt: addHours(new Date(), CHAT_ROOM_LIFESPAN_HOURS),
-			},
-			trx,
-		);
+		// the surviving group keeps its room so a voice call in it carries on
+		let chatRoomId = survivingGroup?.chatRoomId ?? null;
+		if (chatRoomId !== null) {
+			await ChatRepository.updateRoomExpiresAt(
+				{
+					roomId: chatRoomId,
+					expiresAt: addHours(new Date(), CHAT_ROOM_LIFESPAN_HOURS),
+				},
+				trx,
+			);
+		} else {
+			chatRoomId = (
+				await ChatRepository.insertRoom(
+					{
+						type: "SQ_GROUP",
+						expiresAt: addHours(new Date(), CHAT_ROOM_LIFESPAN_HOURS),
+					},
+					trx,
+				)
+			).id;
+		}
 		await trx
 			.updateTable("Group")
-			.set({ chatRoomId: chatRoom.id, matchmade: 1 })
+			.set({ chatRoomId, matchmade: 1 })
 			.where("Group.id", "=", survivingGroupId)
 			.execute();
 
@@ -407,12 +419,6 @@ export function morphGroups({
 		await syncTeamId(survivingGroupId, trx);
 		await deleteLikesAndSuggestionsByGroupId(survivingGroupId, trx);
 		await refreshGroup(survivingGroupId, trx);
-
-		// replaced rather than deleted with its group, so the trigger doesn't remove it
-		await ChatRepository.deleteRoomsByIds(
-			[survivingGroup?.chatRoomId ?? null],
-			trx,
-		);
 
 		await trx
 			.deleteFrom("Group")
@@ -1293,7 +1299,8 @@ async function deleteReadyCheckInTrx(
 /**
  * Records the user as not continuing with the group they last played a matchmade match with,
  * clearing that group's yes votes: it can no longer continue at the size they were for, so the
- * rest have to vote again. Once the no vote is in, later queue actions leave that group be.
+ * rest have to vote again. Once the no vote is in, or the whole group has voted, later queue
+ * actions leave that group be.
  */
 async function recordImplicitRejoinNoVote(
 	userId: number,
@@ -1313,7 +1320,9 @@ async function recordImplicitRejoinNoVote(
 		.select((eb) => [
 			"Group.id as groupId",
 			"GroupMatch.chatRoomId as matchChatRoomId",
-			hasVotedNo(eb, userId).as("alreadySettled"),
+			eb
+				.or([hasVotedNo(eb, userId), hasEveryMemberVoted(eb)])
+				.as("alreadySettled"),
 		])
 		.where("GroupMember.userId", "=", userId)
 		.where("Group.matchmade", "=", 1)
@@ -1354,6 +1363,18 @@ function hasVotedNo(eb: ExpressionBuilder<DB, "Group">, userId: number) {
 			.whereRef("GroupMatchContinueVote.groupId", "=", "Group.id")
 			.where("GroupMatchContinueVote.userId", "=", userId)
 			.where("GroupMatchContinueVote.isContinuing", "=", 0),
+	);
+}
+
+/** Matches the `Group` rows whose continue vote has concluded, every member having voted. */
+function hasEveryMemberVoted(eb: ExpressionBuilder<DB, "Group">) {
+	return eb(
+		eb
+			.selectFrom("GroupMatchContinueVote")
+			.select(({ fn }) => fn.countAll<number>().as("voteCount"))
+			.whereRef("GroupMatchContinueVote.groupId", "=", "Group.id"),
+		">=",
+		FULL_GROUP_SIZE,
 	);
 }
 

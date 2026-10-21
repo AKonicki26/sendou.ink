@@ -1,3 +1,4 @@
+import clsx from "clsx";
 import type { TFunction } from "i18next";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
@@ -80,6 +81,7 @@ export function WeaponSelect<
 			isDisabled={isDisabled}
 			items={items}
 			label={label}
+			labelRequired={isRequired}
 			placeholder={placeholder ?? t("common:forms.weaponSearch.placeholder")}
 			search={{
 				placeholder: t("common:forms.weaponSearch.search.placeholder"),
@@ -123,7 +125,7 @@ export function WeaponSelect<
 									className={styles.weaponImg}
 								/>
 								<span
-									className={styles.weaponLabel}
+									className={clsx(styles.weaponLabel, "truncate")}
 									data-testid={`weapon-select-option-${weaponName}`}
 								>
 									{weaponName}

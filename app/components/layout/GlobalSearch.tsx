@@ -12,6 +12,7 @@ import { Input } from "~/components/Input";
 import { LocaleTime } from "~/components/LocaleTime";
 import { LogInPopover } from "~/components/LogInPopover";
 import type { SearchLoaderData } from "~/features/search/routes/search";
+import { SEARCH_DEBOUNCE_MS } from "~/features/search/search-constants";
 import { searchSearchParams } from "~/features/search/search-search-params";
 import { tournamentOrganizationPage } from "~/features/tournament-organization/tournament-organization-urls";
 import { useDebounce } from "~/hooks/useDebounce";
@@ -82,11 +83,12 @@ export function GlobalSearch() {
 
 	const [isOpen, setIsOpen] = React.useState(searchParamOpen);
 
-	const prevSearchParamOpen = React.useRef(searchParamOpen);
-	if (searchParamOpen !== prevSearchParamOpen.current) {
+	const [prevSearchParamOpen, setPrevSearchParamOpen] =
+		React.useState(searchParamOpen);
+	if (searchParamOpen !== prevSearchParamOpen) {
+		setPrevSearchParamOpen(searchParamOpen);
 		setIsOpen(searchParamOpen);
 	}
-	prevSearchParamOpen.current = searchParamOpen;
 
 	React.useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
@@ -118,6 +120,7 @@ export function GlobalSearch() {
 	return (
 		<>
 			<Link
+				// biome-ignore lint/plugin: opens the search on whichever page is open
 				to={globalSearchSearchParams.href("", { search: "open" })}
 				defaultShouldRevalidate={false}
 				preventScrollReset
@@ -125,7 +128,9 @@ export function GlobalSearch() {
 			>
 				<Search className={styles.searchIcon} />
 				<span className={styles.searchLabel}>
-					<span className={styles.searchPlaceholder}>{t("common:search")}</span>
+					<span className={clsx(styles.searchPlaceholder, "truncate")}>
+						{t("common:search")}
+					</span>
 					<kbd className={styles.searchKbd}>{isMac ? "Cmd+K" : "Ctrl+K"}</kbd>
 				</span>
 			</Link>
@@ -155,7 +160,9 @@ export function LoggedOutGlobalSearch() {
 		<LogInPopover>
 			<button type="button" className={styles.searchButton}>
 				<Search className={styles.searchIcon} />
-				<span className={styles.searchPlaceholder}>{t("common:search")}</span>
+				<span className={clsx(styles.searchPlaceholder, "truncate")}>
+					{t("common:search")}
+				</span>
 			</button>
 		</LogInPopover>
 	);
@@ -219,7 +226,7 @@ function GlobalSearchContent({
 				}),
 			);
 		},
-		300,
+		SEARCH_DEBOUNCE_MS,
 		[query, searchType],
 	);
 
@@ -328,6 +335,7 @@ function GlobalSearchContent({
 					{`${SEARCH_TYPE_TO_PREFIX[searchType]}.`}
 				</p>
 				<Input
+					type="search"
 					ref={inputRef}
 					className={styles.input}
 					placeholder={t("common:search.placeholder")}
@@ -469,7 +477,7 @@ function ResultItem({ result }: { result: SearchResult }) {
 					<div className={styles.resultTexts}>
 						<SearchResultsItemName>{result.name}</SearchResultsItemName>
 						{result.inGameName ? (
-							<span className={styles.resultSecondary}>
+							<span className={clsx(styles.resultSecondary, "truncate")}>
 								{result.inGameName}
 							</span>
 						) : null}
@@ -515,7 +523,7 @@ function ResultItem({ result }: { result: SearchResult }) {
 						<LocaleTime
 							date={result.startsAt}
 							options={{ day: "numeric", month: "long", year: "numeric" }}
-							className={styles.resultSecondary}
+							className={clsx(styles.resultSecondary, "truncate")}
 						/>
 					</div>
 				</SearchResultsItemRow>

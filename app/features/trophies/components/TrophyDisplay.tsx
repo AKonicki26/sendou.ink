@@ -85,7 +85,7 @@ export function TrophyDisplay({
 								model={trophy.model}
 								code={trophy.code}
 								tier={trophy.tier ?? null}
-								preview={!!openTrophy}
+								paused={!!openTrophy}
 								staticOnSoftwareRendering
 								disableCameraControls
 								fps={30}
@@ -212,9 +212,7 @@ function TrophyWinDetails({
 								<UserCard data={userCards.get(member.id)}>
 									<span className={styles.winMemberUser}>
 										<Avatar size="xxxs" user={member} />
-										<span className={styles.winMemberName}>
-											{member.username}
-										</span>
+										<span className="truncate">{member.username}</span>
 									</span>
 								</UserCard>
 								<span className={styles.winMemberWeapons}>

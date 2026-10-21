@@ -11,7 +11,8 @@
  * tells apart by the track's dot comb (`variant`). `ObjectiveData` is
  * discriminated on `mode`. Each read also emits a
  * PlayerStatus event (player-status.ts) off the same frame, paired downstream
- * by the shared timer value.
+ * by the shared timer value. Turf War draws the timer and icon strip with no
+ * counter (`TIMER_VARIANT`): a readable timer alone emits the strip reads.
  */
 import { type Mat, minMaxLoc } from "../../cv";
 import { type GlyphSet, recognizeTextSteps, scaleGlyphSet } from "../../glyphs";
@@ -33,8 +34,8 @@ import type { ScoreboardResources } from "../scoreboard/index";
 import type { DetectedEvent, Detector, GateResult } from "../types";
 import {
 	type PlayerStatusData,
-	type PlayerStatusLayout,
 	parsePlayerStatus,
+	type StripFit,
 } from "./player-status";
 import {
 	CONTROL_PLATE_MIN_SATURATION,
@@ -53,12 +54,17 @@ import {
 	SCORE_EXTEND_MIN_CONF,
 	SCORE_ROIS,
 	SCORE_TEXT_HEIGHTS,
-	STATUS_LAYOUT_STICKY_MAX_GAP_S,
+	STATUS_FIT_STICKY_MAX_GAP_S,
 	STRIP_WEAPON_SAMPLE_INTERVAL,
 	TRACK_PLATE_TEXT_HEIGHTS,
 } from "./rois";
-import { parseStripWeaponsSteps, type StripWeaponsData } from "./strip-weapons";
-import { readMatchTimerSteps, timerBoxChecks, timerGlyphSets } from "./timer";
+import { parseStripWeapons, type StripWeaponsData } from "./strip-weapons";
+import {
+	readMatchTimerSteps,
+	timerBoxChecks,
+	timerColonVisible,
+	timerGlyphSets,
+} from "./timer";
 import { readTrackSteps, trackComb } from "./track";
 
 export type ObjectiveData = ZonesObjectiveData | TrackObjectiveData;
@@ -113,6 +119,8 @@ export const OBJECTIVE_EVENT_TYPE = "Objective";
 /** Gate variants: which overlay the parse reads. */
 const ZONES_VARIANT = "zones";
 const TRACK_VARIANT = "track";
+/** The timer box alone, as Turf War draws it */
+const TIMER_VARIANT = "timer";
 
 /** How often the counter is worth checking (it changes at most 1/s). */
 const CHECK_INTERVAL_SECONDS = 1;
@@ -155,7 +163,7 @@ interface SideRead {
 export function createObjectiveDetector(
 	resources: ScoreboardResources,
 ): Detector<ObjectiveData | PlayerStatusData | StripWeaponsData> {
-	let lastStatus: { layout: PlayerStatusLayout; t: number } | undefined;
+	let lastStatus: { fit: StripFit; t: number } | undefined;
 	// primed so the very first read samples (short matches, single-frame fixtures)
 	let readsSinceWeaponSample = STRIP_WEAPON_SAMPLE_INTERVAL;
 
@@ -207,11 +215,12 @@ export function createObjectiveDetector(
 		return maxVal >= GATE_SCORE_MIN_MAX_BRIGHTNESS;
 	}
 
-	/** The timer box, then the track's dot comb (TC/RM) or the SZ/CB plates. */
+	/** The timer box, then the track's dot comb (TC/RM), the SZ/CB plates or neither (TW). */
 	function gate(frame: Mat): GateResult {
 		const gray = frameGray(frame);
 		const timerChecks = timerBoxChecks(gray);
-		if (timerChecks.every(Boolean) && trackComb(frame) >= GATE_TRACK_MIN_COMB) {
+		const timerBox = timerChecks.every(Boolean);
+		if (timerBox && trackComb(frame) >= GATE_TRACK_MIN_COMB) {
 			return { pass: true, score: 1, variant: TRACK_VARIANT };
 		}
 		const checks = [
@@ -222,6 +231,9 @@ export function createObjectiveDetector(
 			scoreInkOk(frame, SCORE_ROIS[1]),
 		];
 		const passed = checks.filter(Boolean).length;
+		if (passed < checks.length && timerBox && timerColonVisible(gray)) {
+			return { pass: true, score: 1, variant: TIMER_VARIANT };
+		}
 		return {
 			pass: passed === checks.length,
 			score: passed / checks.length,
@@ -357,19 +369,26 @@ export function createObjectiveDetector(
 		const counter =
 			variant === TRACK_VARIANT
 				? yield* parseTrackSteps(frame, speculative)
-				: yield* parseZonesSteps(frame, speculative);
-		if (!counter) return [];
-		const timeValue = counter.event.data.time;
+				: variant === ZONES_VARIANT
+					? yield* parseZonesSteps(frame, speculative)
+					: null;
+		// no counter read (Turf War, or a plate/track lookalike over the real HUD):
+		// a readable timer alone vouches for the strip
+		const timeValue = counter
+			? counter.event.data.time
+			: (yield* readMatchTimerSteps(frameGray(frame), timerSets, speculative))
+					.value;
+		if (!counter && timeValue === null) return [];
 
-		const playerStatus = parsePlayerStatus(
+		const { event: playerStatus, fit } = parsePlayerStatus(
 			frame,
 			t,
 			timeValue,
-			lastStatus && t - lastStatus.t <= STATUS_LAYOUT_STICKY_MAX_GAP_S
-				? lastStatus.layout
+			lastStatus && t - lastStatus.t <= STATUS_FIT_STICKY_MAX_GAP_S
+				? lastStatus.fit
 				: undefined,
 		);
-		lastStatus = { layout: playerStatus.data.layout, t };
+		lastStatus = { fit, t };
 
 		// sampled slot-identity evidence for the strip → scoreboard-row assignment;
 		// identities are fixed so every read would re-measure at full sweep cost
@@ -380,10 +399,11 @@ export function createObjectiveDetector(
 			readsSinceWeaponSample >= STRIP_WEAPON_SAMPLE_INTERVAL
 		) {
 			readsSinceWeaponSample = 0;
-			stripWeapons = yield* parseStripWeaponsSteps(
+			stripWeapons = parseStripWeapons(
 				frame,
 				t,
 				playerStatus.data,
+				fit,
 				resources.stripWeapons,
 			);
 		}
@@ -391,7 +411,7 @@ export function createObjectiveDetector(
 		return [
 			// the strip statuses ride along with every counter read; the shared
 			// timer value pairs the two events downstream
-			{ ...counter.event, t },
+			...(counter ? [{ ...counter.event, t }] : []),
 			playerStatus,
 			...(stripWeapons ? [stripWeapons] : []),
 		];

@@ -70,6 +70,17 @@ describe("MapList.generate()", () => {
 			}
 		});
 
+		test("does not repeat the stage order when the list goes through every stage twice", () => {
+			const gen = initGenerator(ALL_MAPS_TEST_MAP_POOL);
+			const stages = gen
+				.next({ amount: stageIds.length * 2 })
+				.value.map((map) => map.stageId);
+
+			expect(stages.slice(stageIds.length)).not.toEqual(
+				stages.slice(0, stageIds.length),
+			);
+		});
+
 		test("contains every mode once before repeating", () => {
 			const gen = initGenerator();
 			const maps = gen.next({ amount: 5 }).value;
@@ -670,6 +681,59 @@ describe("MapList.generate() with initialWeights", () => {
 		const maps = gen.next({ amount: 3 }).value;
 
 		expect(maps[0].stageId).toBe(1);
+	});
+});
+
+describe("MapList.generate() with candidateFilters", () => {
+	const SZ_ONLY_MAP_POOL = new MapPool({
+		SZ: [1, 2, 3, 4, 5, 6],
+		TC: [],
+		RM: [],
+		CB: [],
+		TW: [],
+	});
+
+	test("draws from the first filter that leaves any candidate", () => {
+		for (let i = 0; i < 20; i++) {
+			const gen = MapList.generate({
+				mapPool: SZ_ONLY_MAP_POOL,
+				candidateFilters: () => [
+					(map) => map.stageId === 10,
+					(map) => map.stageId === 2 || map.stageId === 3,
+				],
+			});
+			gen.next();
+
+			const maps = gen.next({ amount: 2 }).value;
+
+			expect(maps.map((m) => m.stageId).sort()).toEqual([2, 3]);
+		}
+	});
+
+	test("draws from every candidate when no filter leaves any", () => {
+		const gen = MapList.generate({
+			mapPool: SZ_ONLY_MAP_POOL,
+			candidateFilters: () => [(map) => map.stageId === 10],
+		});
+		gen.next();
+
+		const maps = gen.next({ amount: 6 }).value;
+
+		expect(new Set(maps.map((m) => m.stageId)).size).toBe(6);
+	});
+
+	test("passes the map's index in the set to the filters", () => {
+		for (let i = 0; i < 20; i++) {
+			const gen = MapList.generate({
+				mapPool: SZ_ONLY_MAP_POOL,
+				candidateFilters: (index) => [(map) => map.stageId === index + 1],
+			});
+			gen.next();
+
+			const maps = gen.next({ amount: 3 }).value;
+
+			expect(maps.map((m) => m.stageId)).toEqual([1, 2, 3]);
+		}
 	});
 });
 

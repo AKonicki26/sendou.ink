@@ -51,12 +51,15 @@ export function* generate(args: {
 	modeOrder?: ModeShort[];
 	/** Mode-agnostic initial stage weights, how `resume` carries over stage-level penalties from history. */
 	initialStageWeights?: Map<StageId, number>;
+	/** Filters per map index of a set, tried in order. The first one leaving any candidate narrows the draw. */
+	candidateFilters?: (index: number) => Array<(map: ModeWithStage) => boolean>;
 }): Generator<Array<ModeWithStage>, Array<ModeWithStage>, GenerateNext> {
 	if (args.mapPool.isEmpty()) {
 		while (true) yield [];
 	}
 
 	const modes = args.mapPool.modes;
+	const distinctStageCount = new Set(args.mapPool.stages).size;
 
 	const { stageWeights, stageModeWeights } = initializeWeights(
 		modes,
@@ -86,15 +89,16 @@ export function* generate(args: {
 					modesConsumed: amount,
 				};
 
-		if (!args.skipEnsureMinimumCandidates) {
-			ensureMinimumCandidates({
-				mapPool: args.mapPool,
-				stageWeights,
-				stageModeWeights,
-			});
-		}
-
 		for (let i = 0; i < amount; i++) {
+			const isStartOfPoolCycle = i % distinctStageCount === 0;
+			if (!args.skipEnsureMinimumCandidates && isStartOfPoolCycle) {
+				ensureMinimumCandidates({
+					mapPool: args.mapPool,
+					stageWeights,
+					stageModeWeights,
+				});
+			}
+
 			const mode = currentModeOrder[i % currentModeOrder.length];
 			const possibleStages = args.mapPool.parsed[mode];
 			const isNotGuaranteedToBePlayed = args.considerGuaranteed
@@ -106,6 +110,7 @@ export function* generate(args: {
 				mode,
 				stageWeights,
 				stageModeWeights,
+				filters: args.candidateFilters?.(i) ?? [],
 			});
 
 			result.push({ mode, stageId });
@@ -239,11 +244,13 @@ function selectStageWeighted({
 	mode,
 	stageWeights,
 	stageModeWeights,
+	filters,
 }: {
 	possibleStages: readonly StageId[];
 	mode: ModeShort;
 	stageWeights: Map<StageId, number>;
 	stageModeWeights: Map<string, number>;
+	filters: Array<(map: ModeWithStage) => boolean>;
 }): StageId {
 	const getCandidates = () =>
 		possibleStages.filter((stageId) => {
@@ -263,6 +270,14 @@ function selectStageWeighted({
 			stageModeWeights.set(key, value + 1);
 		}
 		candidates = getCandidates();
+	}
+
+	for (const filter of filters) {
+		const filtered = candidates.filter((stageId) => filter({ mode, stageId }));
+		if (filtered.length > 0) {
+			candidates = filtered;
+			break;
+		}
 	}
 
 	return weightedRandomSelect(candidates, (stageId) => {

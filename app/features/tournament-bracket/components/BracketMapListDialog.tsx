@@ -119,7 +119,7 @@ export function BracketMapListDialog({
 	const [thirdPlaceMatchLinked, setThirdPlaceMatchLinked] = React.useState(
 		() => {
 			if (
-				!Engine.hasThirdPlaceMatch({
+				!Engine.thirdPlaceMatchLinkable({
 					type: bracket.type,
 					settings: bracket.settings,
 					participantsCount: eliminationTeamCount ?? 2,
@@ -165,7 +165,7 @@ export function BracketMapListDialog({
 				bracket,
 				teamCount: eliminationTeamCount ?? 2,
 			})
-		: bracket.data;
+		: PreparedMaps.mapListData(bracket.data);
 	const rounds = bracketData.round;
 	const defaultRoundBestOfs = bracket.defaultRoundBestOfs(bracketData);
 
@@ -225,47 +225,12 @@ export function BracketMapListDialog({
 		tournamentRoundMapList: maps,
 	});
 
-	const roundsWithNames = React.useMemo(() => {
-		if (bracket.type === "round_robin" || bracket.type === "swiss") {
-			return Array.from(maps.keys()).map((roundId, i) => {
-				return {
-					id: roundId,
-					name: `Round ${i + 1}`,
-				};
-			});
-		}
-
-		if (bracket.type === "double_elimination") {
-			const winners = getRounds({ type: "winners", bracketData });
-			const losers = getRounds({ type: "losers", bracketData });
-
-			return [...winners, ...losers];
-		}
-
-		if (bracket.type === "single_elimination") {
-			const singleElimRounds = getRounds({ type: "single", bracketData });
-
-			const hasThirdPlaceMatch = singleElimRounds.some(
-				(round) => round.section === "finals",
-			);
-
-			if (!thirdPlaceMatchLinked || !hasThirdPlaceMatch)
-				return singleElimRounds;
-
-			return singleElimRounds
-				.filter((round) => round.section !== "finals")
-				.map((round) =>
-					round.name === "Finals"
-						? {
-								...round,
-								name: TOURNAMENT.ROUND_NAMES.FINALS_THIRD_PLACE_MATCH_UNIFIED,
-							}
-						: round,
-				);
-		}
-
-		assertUnreachable(bracket.type);
-	}, [bracketData, maps, bracket.type, thirdPlaceMatchLinked]);
+	const roundsWithNames = roundsWithNamesFor({
+		bracketType: bracket.type,
+		bracketData,
+		roundIds: Array.from(maps.keys()),
+		thirdPlaceMatchLinked,
+	});
 
 	const mapCountsWithGlobalCount = (newCount: number) => {
 		const newMap = new Map(defaultRoundBestOfs);
@@ -893,8 +858,11 @@ function teamCountAdjustedBracketData({
 			);
 		case "single_elimination":
 		case "double_elimination":
-			return bracket.generateMatchesData(
-				nullFilledArray(teamCount).map((_, i) => i + 1),
+			// groups share map lists
+			return PreparedMaps.mapListData(
+				bracket.generateMatchesData(
+					nullFilledArray(teamCount).map((_, i) => i + 1),
+				),
 			);
 	}
 }
@@ -1074,6 +1042,7 @@ function RoundMapList({
 	hoveredMap: string | null;
 }) {
 	const { t } = useTranslation(["forms"]);
+	const playableAtId = React.useId();
 	const minCount = TOURNAMENT.AVAILABLE_BEST_OF[0];
 	const maxCount = TOURNAMENT.AVAILABLE_BEST_OF.at(-1)!;
 
@@ -1082,8 +1051,11 @@ function RoundMapList({
 			<h3>{name}</h3>
 			{playableAt ? (
 				<div className={styles.playableAt}>
+					<Label htmlFor={playableAtId}>
+						{t("forms:labels.roundPlayableFrom")}
+					</Label>
 					<SendouDatePicker
-						label={t("forms:labels.roundPlayableFrom")}
+						id={playableAtId}
 						granularity="day"
 						value={
 							playableAt.value !== null
@@ -1507,4 +1479,55 @@ function PatternInputs({
 			</div>
 		</div>
 	);
+}
+
+function roundsWithNamesFor({
+	bracketType,
+	bracketData,
+	roundIds,
+	thirdPlaceMatchLinked,
+}: {
+	bracketType: Bracket["type"];
+	bracketData: Parameters<typeof getRounds>[0]["bracketData"];
+	roundIds: number[];
+	thirdPlaceMatchLinked: boolean;
+}) {
+	if (bracketType === "round_robin" || bracketType === "swiss") {
+		return roundIds.map((roundId, i) => {
+			return {
+				id: roundId,
+				name: `Round ${i + 1}`,
+			};
+		});
+	}
+
+	if (bracketType === "double_elimination") {
+		const winners = getRounds({ type: "winners", bracketData });
+		const losers = getRounds({ type: "losers", bracketData });
+
+		return [...winners, ...losers];
+	}
+
+	if (bracketType === "single_elimination") {
+		const singleElimRounds = getRounds({ type: "single", bracketData });
+
+		const hasThirdPlaceMatch = singleElimRounds.some(
+			(round) => round.section === "finals",
+		);
+
+		if (!thirdPlaceMatchLinked || !hasThirdPlaceMatch) return singleElimRounds;
+
+		return singleElimRounds
+			.filter((round) => round.section !== "finals")
+			.map((round) =>
+				round.name === "Finals"
+					? {
+							...round,
+							name: TOURNAMENT.ROUND_NAMES.FINALS_THIRD_PLACE_MATCH_UNIFIED,
+						}
+					: round,
+			);
+	}
+
+	assertUnreachable(bracketType);
 }

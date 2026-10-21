@@ -1,19 +1,18 @@
 import { CalendarClock, Search } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-	Link,
-	type MetaFunction,
-	NavLink,
-	Outlet,
-	useLoaderData,
-} from "react-router";
+import { Link, type MetaFunction, Outlet, useLoaderData } from "react-router";
 import * as R from "remeda";
 import { Divider } from "~/components/Divider";
 import { Input } from "~/components/Input";
 import { Main } from "~/components/Main";
 import type { SendouRouteHandle } from "~/utils/remix.server";
-import { BADGES_PAGE, navIconUrl, TROPHIES_PAGE } from "~/utils/urls";
+import {
+	BADGES_PAGE,
+	navIconUrl,
+	TROPHIES_PAGE,
+	trophyPage,
+} from "~/utils/urls";
 import { metaTags, ogPageImage } from "../../../utils/remix";
 import {
 	Trophy,
@@ -70,6 +69,7 @@ export default function TrophiesPage() {
 				<Outlet />
 				<div className={styles.trophiesListContainer}>
 					<Input
+						type="search"
 						icon={<Search />}
 						value={inputValue}
 						onChange={(e) => setInputValue(e.target.value)}
@@ -77,7 +77,11 @@ export default function TrophiesPage() {
 					<TrophyGrid>
 						<TrophyContextProvider>
 							{filteredTrophies.map((trophy, i) => (
-								<NavLink to={String(trophy.id)} key={trophy.id}>
+								<Link
+									to={trophyPage(trophy.id)}
+									key={trophy.id}
+									prefetch="intent"
+								>
 									<Trophy
 										model={trophy.model}
 										tier={trophy.tier}
@@ -94,7 +98,7 @@ export default function TrophiesPage() {
 											) : undefined
 										}
 									/>
-								</NavLink>
+								</Link>
 							))}
 						</TrophyContextProvider>
 					</TrophyGrid>
@@ -142,9 +146,10 @@ function XpTrophiesSection({ searchValue }: { searchValue: string }) {
 						return (
 							<div key={category} className={styles.xpRow}>
 								{row.map(({ trophy, i }) => (
-									<NavLink
-										to={String(trophy.id)}
+									<Link
+										to={trophyPage(trophy.id)}
 										key={trophy.id}
+										prefetch="intent"
 										aria-label={trophy.name}
 									>
 										<Trophy
@@ -153,7 +158,7 @@ function XpTrophiesSection({ searchValue }: { searchValue: string }) {
 											preview
 											deferred={i >= visibleCount}
 										/>
-									</NavLink>
+									</Link>
 								))}
 							</div>
 						);

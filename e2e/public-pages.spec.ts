@@ -1,5 +1,5 @@
 import { ADMIN_ID } from "~/features/admin/admin-constants";
-import { dateToDatabaseTimestamp } from "~/utils/dates";
+import { databaseTimestampNow } from "~/utils/dates";
 import { expect, expectNoErrorPage, test } from "./helpers/playwright";
 import { ArticlesPage } from "./pages/articles/articles-page";
 import { BuildsPage } from "./pages/builds/builds-page";
@@ -46,7 +46,7 @@ test.describe("Public pages", () => {
 			ownerId: user.id,
 			weaponSplIds: [BUILD_WEAPON_ID],
 		});
-		const startTimes = [dateToDatabaseTimestamp(new Date())];
+		const startTimes = [databaseTimestampNow()];
 		await factories.CalendarEventFactory.create({
 			authorId: ADMIN_ID,
 			name: EVENT_NAME,
@@ -117,18 +117,13 @@ test.describe("Public pages", () => {
 		await expect(scanner.locators.startCaptureButton).toBeVisible();
 	});
 
-	test("prompts a logged out visitor to log in when using search or a filter", async ({
+	test("prompts a logged out visitor to log in when using search", async ({
 		page,
 	}) => {
 		const weaponBuilds = new WeaponBuildsPage(page);
 		await weaponBuilds.goto(BUILD_WEAPON_SLUG);
 
 		const logInPopover = new LogInPopover(page);
-
-		await weaponBuilds.locators.addFilterButton.click();
-		await expect(logInPopover.locators.logInButton).toBeVisible();
-
-		await page.keyboard.press("Escape");
 
 		await new TopRightButtons(page).locators.searchButton.click();
 		await expect(logInPopover.locators.logInButton).toBeVisible();
@@ -157,7 +152,7 @@ test.describe("Public pages", () => {
 		await factories.CalendarEventFactory.create({
 			authorId: ADMIN_ID,
 			name: ICS_EVENT_NAME,
-			startTimes: [dateToDatabaseTimestamp(new Date())],
+			startTimes: [databaseTimestampNow()],
 		});
 
 		const errorPage = new ErrorPage(page);

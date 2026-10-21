@@ -7,6 +7,7 @@ import {
 	dateToDatabaseTimestamp,
 } from "~/utils/dates";
 import { invariant } from "../../../utils/invariant";
+import * as SkippedRounds from "./SkippedRounds";
 
 export interface DBSource {
 	bracketIdx: number;
@@ -48,10 +49,6 @@ export type ValidationError =
 	| {
 			type: "PLACEMENTS_PARSE_ERROR";
 			bracketIdx: number;
-	  }
-	// tournament ends with a format that does not resolve a winner e.g. round robin or grouped swiss
-	| {
-			type: "NOT_RESOLVING_WINNER";
 	  }
 	// from each bracket one placement can lead to only one bracket
 	| {
@@ -131,6 +128,16 @@ export type ValidationError =
 	// teams that started in different brackets can never meet
 	| {
 			type: "MERGED_STARTING_BRACKETS";
+			bracketIdx: number;
+	  }
+	// skipped rounds must belong to the bracket's format and every round depending on a skipped one must be skipped too
+	| {
+			type: "INVALID_SKIPPED_ROUNDS";
+			bracketIdx: number;
+	  }
+	// elimination brackets can be split into a limited number of groups
+	| {
+			type: "INVALID_GROUP_COUNT";
 			bracketIdx: number;
 	  };
 
@@ -244,12 +251,6 @@ export function bracketsToValidationError(
 		return {
 			type: "MERGED_STARTING_BRACKETS",
 			bracketIdx: mergedStartingBracketsIdx,
-		};
-	}
-
-	if (!resolvesWinner(brackets)) {
-		return {
-			type: "NOT_RESOLVING_WINNER",
 		};
 	}
 
@@ -369,6 +370,22 @@ export function bracketsToValidationError(
 		};
 	}
 
+	faultyBracketIdx = invalidSkippedRounds(brackets);
+	if (typeof faultyBracketIdx === "number") {
+		return {
+			type: "INVALID_SKIPPED_ROUNDS",
+			bracketIdx: faultyBracketIdx,
+		};
+	}
+
+	faultyBracketIdx = invalidEliminationGroupCount(brackets);
+	if (typeof faultyBracketIdx === "number") {
+		return {
+			type: "INVALID_GROUP_COUNT",
+			bracketIdx: faultyBracketIdx,
+		};
+	}
+
 	return null;
 }
 
@@ -431,7 +448,8 @@ function toOutputBracketFormat(brackets: InputBracket[]): ParsedBracket[] {
 	return result;
 }
 
-function parsePlacements(
+/** "1-3,5+" -> { placements: [1, 2, 3, 5], rest: true }, null if not valid placements syntax. Empty input is the Swiss early advance case. */
+export function parsePlacements(
 	placements: string,
 ): { placements: number[]; rest: boolean } | null {
 	if (placements.trim() === "") {
@@ -485,20 +503,6 @@ function parsePlacements(
 	if (result.includes(0)) return null;
 
 	return { placements: result, rest };
-}
-
-function resolvesWinner(brackets: ParsedBracket[]) {
-	const finals = brackets.find((_, idx) => isFinals(idx, brackets));
-
-	if (!finals) return false;
-	if (
-		finals.type === "swiss" &&
-		(finals.settings.groupCount ?? TOURNAMENT.SWISS_DEFAULT_GROUP_COUNT) > 1
-	) {
-		return false;
-	}
-
-	return true;
 }
 
 function samePlacementToMultipleBrackets(brackets: ParsedBracket[]) {
@@ -761,6 +765,48 @@ function abDivisionsOddTeamsPerGroup(brackets: ParsedBracket[]) {
 	return null;
 }
 
+function invalidSkippedRounds(brackets: ParsedBracket[]) {
+	for (const [bracketIdx, bracket] of brackets.entries()) {
+		const skipped = bracket.settings.skippedRounds;
+		if (!skipped) continue;
+
+		if (
+			bracket.type !== "single_elimination" &&
+			bracket.type !== "double_elimination"
+		) {
+			return bracketIdx;
+		}
+
+		if (!SkippedRounds.isValid(bracket.type, skipped)) return bracketIdx;
+	}
+
+	return null;
+}
+
+function invalidEliminationGroupCount(brackets: ParsedBracket[]) {
+	for (const [bracketIdx, bracket] of brackets.entries()) {
+		if (
+			bracket.type !== "single_elimination" &&
+			bracket.type !== "double_elimination"
+		) {
+			continue;
+		}
+
+		const groupCount = bracket.settings.groupCount;
+		if (groupCount === undefined) continue;
+
+		if (
+			!(
+				TOURNAMENT.ELIMINATION_GROUP_COUNT_OPTIONS as readonly number[]
+			).includes(groupCount)
+		) {
+			return bracketIdx;
+		}
+	}
+
+	return null;
+}
+
 function swissEarlyAdvanceWithoutDestination(brackets: ParsedBracket[]) {
 	for (const [bracketIdx, bracket] of brackets.entries()) {
 		if (bracket.type === "swiss" && bracket.settings.advanceThreshold) {
@@ -904,7 +950,15 @@ export function isError(
 export function isFinals(idx: number, brackets: ParsedBracket[]) {
 	invariant(idx < brackets.length, "Bracket index out of bounds");
 
-	return resolveMainBracketProgression(brackets).at(-1) === idx;
+	return finalsBracketIdx(brackets) === idx;
+}
+
+/** Index of the last bracket of the main progression starting from `startBracketIdx`, e.g. a division's top cut. */
+export function finalsBracketIdx(
+	brackets: ParsedBracket[],
+	startBracketIdx = 0,
+): number {
+	return resolveMainBracketProgression(brackets, startBracketIdx).at(-1)!;
 }
 
 /** Whether the finals bracket is an A/B divisions round robin. */
@@ -1073,10 +1127,17 @@ export function changedStartingBrackets(
  * Bracket order for standings: a participant's standing comes from the first bracket in this order they
  * are in. Finals first; a bracket always comes after every bracket it advances teams to, so teams it
  * eliminated end up below those that advanced. Underground brackets are omitted as they only break
- * ties within their source bracket, see `tiebrokenByUndergroundBrackets`.
+ * ties within their source bracket, see `tiebrokenByUndergroundBrackets`. Considers the brackets
+ * reachable from `startingBracketIdx`, for tournaments with many starting brackets (divisions).
  */
-export function bracketIdxsForStandings(progression: ParsedBracket[]) {
-	const bracketsToConsider = bracketsReachableFrom(0, progression);
+export function bracketIdxsForStandings(
+	progression: ParsedBracket[],
+	startingBracketIdx = 0,
+) {
+	const bracketsToConsider = bracketsReachableFrom(
+		startingBracketIdx,
+		progression,
+	);
 
 	const ordered = destinationsFirstOrder(bracketsToConsider, progression);
 

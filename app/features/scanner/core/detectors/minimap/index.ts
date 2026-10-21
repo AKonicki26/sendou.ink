@@ -59,6 +59,7 @@ import {
 	enemyWeaponRoi,
 	GATE_BRIGHT_MIN_MAX,
 	GATE_CLOSE_DARK_PROBES,
+	GATE_CLOSE_RING_MAX_BRIGHT_PROBES,
 	GATE_CLOSE_X_BRIGHT,
 	GATE_CLOSE_X_DARK,
 	GATE_DARK_MAX_MEAN,
@@ -70,6 +71,7 @@ import {
 	GATE_SPECTATOR_X_MIRRORED_DARK,
 	MINIMAP_ABILITY_INK_THRESHOLD,
 	MINIMAP_WEAPON_INK_THRESHOLD,
+	NAME_BIN_SURFACE_MARGIN,
 	NAME_BIN_THRESHOLD,
 	NAME_PLAIN_TIE_MARGIN,
 	NAME_TEXT_HEIGHT,
@@ -135,6 +137,8 @@ export interface MinimapData {
 }
 
 export const MINIMAP_EVENT_TYPE = "Minimap";
+
+export const MINIMAP_DETECTOR_ID = "minimap";
 
 /**
  * Timeline content guard: frames in the merge window collapse only while every
@@ -220,6 +224,18 @@ function crossedOut(crossFraction: number, crossLap: number): boolean {
 	);
 }
 
+function medianBrightness(gray: Mat): number {
+	const histogram = new Uint32Array(256);
+	const n = gray.rows * gray.cols;
+	for (let i = 0; i < n; i++) histogram[gray.data[i]!]!++;
+	let seen = 0;
+	for (let v = 0; v < 256; v++) {
+		seen += histogram[v]!;
+		if (seen * 2 >= n) return v;
+	}
+	return 255;
+}
+
 /** fraction of the probe that is saturated-and-bright (cross-out strokes) */
 function saturatedFraction(hsv: Mat, roi: Roi): number {
 	const m = copyRoi(hsv, roi);
@@ -291,15 +307,21 @@ export function createMinimapDetector(
 
 	/** POV overlay chrome: close-button disc + Spawn Point pill. */
 	function overlayGate(gray: Mat): GateResult {
-		return probeGate(
+		const chrome = probeGate(
 			gray,
-			[
-				...GATE_CLOSE_DARK_PROBES,
-				...GATE_CLOSE_X_DARK,
-				...GATE_SPAWN_DARK_PROBES,
-			],
+			[...GATE_CLOSE_X_DARK, ...GATE_SPAWN_DARK_PROBES],
 			[...GATE_CLOSE_X_BRIGHT, GATE_SPAWN_BRIGHT],
 		);
+		const darkRing = GATE_CLOSE_DARK_PROBES.filter(
+			(roi) => meanBrightness(gray, roi) <= GATE_DARK_MAX_MEAN,
+		).length;
+		return {
+			pass:
+				chrome.pass &&
+				darkRing >=
+					GATE_CLOSE_DARK_PROBES.length - GATE_CLOSE_RING_MAX_BRIGHT_PROBES,
+			score: (chrome.score + darkRing / GATE_CLOSE_DARK_PROBES.length) / 2,
+		};
 	}
 
 	/** Spectator screen: the X jump-button disc beside the 8th player card, in whichever column carries the face buttons. */
@@ -431,7 +453,12 @@ export function createMinimapDetector(
 		const parsed = yield* parseNameSteps(
 			band,
 			glyphs,
-			{ binThreshold: NAME_BIN_THRESHOLD },
+			{
+				binThreshold: Math.max(
+					NAME_BIN_THRESHOLD,
+					medianBrightness(band) + NAME_BIN_SURFACE_MARGIN,
+				),
+			},
 			speculative,
 		);
 		band.delete();
@@ -905,7 +932,7 @@ export function createMinimapDetector(
 	// starved the frame queue (2026-08-23 Mincemeat: last 95s of counter reads
 	// lost). The rearm cooldown covers gate flicker like death's does.
 	return {
-		id: "minimap",
+		id: MINIMAP_DETECTOR_ID,
 		refineIntervalS: 0.4,
 		sufficientConfidence: SUFFICIENT_CONFIDENCE,
 		rearmCooldownS: 5,

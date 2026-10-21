@@ -21,7 +21,7 @@ const UNLINKED: TournamentSettings["bracketProgression"] = [
 		name: "Playoffs",
 		type: "single_elimination",
 		requiresCheckIn: false,
-		settings: { thirdPlaceMatch: false },
+		settings: { skippedRounds: ["THIRD_PLACE_MATCH"] },
 	},
 ];
 
@@ -76,7 +76,7 @@ describe("TournamentRepository.updateProgression", () => {
 
 		expect(updated.isMultiStartingBracket).toBe(false);
 		expect(updated.ctx.teams.map((team) => team.id)).toEqual(teamIds);
-		expect(updated.bracketByIdx(0)?.seeding).toEqual(teamIds);
+		expect(updated.bracketByIdx(0)?.previewSeeding).toEqual(teamIds);
 		expect(updated.teamById(teamIds[1])?.seed).toBe(2);
 	});
 });

@@ -11,6 +11,7 @@ import type { ScannerLobby } from "../../../scanner-types";
 import type { Mat } from "../../cv";
 import { type GlyphSet, scaleGlyphSet } from "../../glyphs";
 import {
+	copyRoi,
 	cropRoi,
 	frameGray,
 	frameRgb,
@@ -18,6 +19,7 @@ import {
 	meanBrightness,
 } from "../../image";
 import { all, done, type MatchSteps, runSync } from "../../match-steps";
+import type { StripWeaponTemplate } from "../objective/strip-weapons";
 import type { DetectedEvent, Detector, GateResult } from "../types";
 import {
 	FULL_COUNT_TEAM_SCORE,
@@ -35,6 +37,9 @@ import {
 	gateDarkProbe,
 	MATCH_SCORE_DIGIT_HEIGHTS,
 	MATCH_SCORE_ROIS,
+	NO_CONTEST_GREY_VALUE_RANGE,
+	NO_CONTEST_INK_MIN_SATURATION,
+	NO_CONTEST_MAX_INK_SHARE,
 	nameRoi,
 	PAINT_DIGIT_HEIGHT,
 	paintRoi,
@@ -43,6 +48,7 @@ import {
 	ROW_CENTERS,
 	specialIconRoi,
 	statRoi,
+	TEAM_BOX_BAND_ROIS,
 	TEAM_DIGIT_HEIGHT,
 	TEAM_SCORE_ROIS,
 	weaponRoi,
@@ -69,6 +75,11 @@ export interface ScoreboardData {
 	stage: StageId | null;
 	/** "Score:" banner scores, [winner, loser]; a knockout's winner reports 100 (the burst hides the banner) */
 	matchScores: [number | null, number | null];
+	/**
+	 * Results screen only: the game ended before it was decided (host ended it,
+	 * early disconnect) — DRAW on both grey team boxes, "No contest." for a score
+	 */
+	noContest?: boolean;
 	/** 8 players: rows 0-3 winning team, rows 4-7 losing team */
 	players: ScoreboardPlayer[];
 	/** index into `players` of the yellow-arrow row; null when none (spectator footage) */
@@ -89,10 +100,10 @@ export interface ScoreboardRowDebug {
 export interface ScoreboardResources {
 	weapons: WeaponTemplate[];
 	/**
-	 * Renders for the in-match icon strip (StripWeapons); without them slot → row assignment falls
-	 * back to as-drawn order.
+	 * Masked icon art for the in-match icon strip (StripWeapons); without it slot → row assignment
+	 * leans on the other identity evidence alone.
 	 */
-	stripWeapons?: WeaponTemplate[] | null;
+	stripWeapons?: StripWeaponTemplate[] | null;
 	/**
 	 * Special silhouettes (assets/cv/specials); without them near-tied icons (Splash- vs
 	 * Sploosh-o-matic) stay decided by icon score.
@@ -319,6 +330,7 @@ export function createScoreboardDetector(
 					mode: header?.mode ?? null,
 					stage: header?.stage ?? null,
 					matchScores,
+					noContest: isNoContest(rgb),
 					players,
 					povIndex,
 				},
@@ -340,4 +352,29 @@ export function createScoreboardDetector(
 			runSync(parseSteps(frame, t, gateResult, false)),
 		parseSteps,
 	};
+}
+
+function isNoContest(rgb: Mat): boolean {
+	return TEAM_BOX_BAND_ROIS.every((roi) => {
+		const band = copyRoi(rgb, roi);
+		const pixels = band.data as Uint8Array;
+		const channels = band.channels();
+		let ink = 0;
+		let valueSum = 0;
+		for (let i = 0; i < pixels.length; i += channels) {
+			const value = Math.max(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!);
+			const spread =
+				value - Math.min(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!);
+			if (value > 0 && spread >= NO_CONTEST_INK_MIN_SATURATION * value) ink++;
+			valueSum += value;
+		}
+		band.delete();
+		const count = pixels.length / channels;
+		const meanValue = valueSum / count;
+		return (
+			ink / count <= NO_CONTEST_MAX_INK_SHARE &&
+			meanValue >= NO_CONTEST_GREY_VALUE_RANGE[0] &&
+			meanValue <= NO_CONTEST_GREY_VALUE_RANGE[1]
+		);
+	});
 }

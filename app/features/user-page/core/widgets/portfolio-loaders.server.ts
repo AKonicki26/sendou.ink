@@ -1,10 +1,10 @@
 import * as ArtRepository from "~/features/art/ArtRepository.server";
-import { getUser } from "~/features/auth/core/user.server";
 import * as BadgeRepository from "~/features/badges/BadgeRepository.server";
 import * as BuildRepository from "~/features/builds/BuildRepository.server";
 import * as FriendRepository from "~/features/friends/FriendRepository.server";
 import * as LeaderboardRepository from "~/features/leaderboards/LeaderboardRepository.server";
 import * as LFGRepository from "~/features/lfg/LFGRepository.server";
+import * as LiveStream from "~/features/live-streams/core/LiveStream";
 import * as LiveStreamRepository from "~/features/live-streams/LiveStreamRepository.server";
 import { BANNED_MAPS } from "~/features/match-profile/banned-maps";
 import * as MatchProfileRepository from "~/features/match-profile/MatchProfileRepository.server";
@@ -19,6 +19,7 @@ import * as UserRepository from "~/features/user-page/UserRepository.server";
 import * as VodRepository from "~/features/vods/VodRepository.server";
 import { modesShort } from "~/modules/in-game-lists/modes";
 import { weaponCategories } from "~/modules/in-game-lists/weapon-ids";
+import { toDBBoolean } from "~/utils/sql";
 import type { ExtractWidgetSettings } from "./types";
 import { cachedUserSQLeaderboardTopData } from "./utils.server";
 
@@ -216,7 +217,7 @@ export const WIDGET_LOADERS = {
 		return VodRepository.findByUserId(userId, 3);
 	},
 	"lfg-posts": async (userId: number) => {
-		return LFGRepository.findByAuthorUserId(userId, getUser());
+		return LFGRepository.findByAuthorUserId(userId);
 	},
 	"top-500-weapons": async (userId: number) => {
 		const placements =
@@ -309,8 +310,8 @@ export const WIDGET_LOADERS = {
 
 		return settings.weaponPool.map((weapon) => ({
 			weaponSplId: weapon.id,
-			isFavorite: weapon.isFavorite ? 1 : 0,
-			isTenStar: tenStarWeaponSplIds.includes(weapon.id) ? 1 : 0,
+			isFavorite: toDBBoolean(weapon.isFavorite),
+			isTenStar: toDBBoolean(tenStarWeaponSplIds.includes(weapon.id)),
 		}));
 	},
 	"custom-kits": async (
@@ -363,7 +364,13 @@ export const WIDGET_LOADERS = {
 		});
 	},
 	"live-stream": async (userId: number) => {
-		return LiveStreamRepository.findByUserId(userId);
+		const streams = await LiveStreamRepository.findByUserId(userId);
+
+		return (
+			LiveStream.groupByStreamer(
+				streams.map((stream) => ({ ...stream, userId })),
+			).at(0) ?? null
+		);
 	},
 };
 
